@@ -102,19 +102,25 @@ func (s *Site) tryDirect(ctx context.Context, pc *peerClient, endpoints []string
 		pc.mu.Unlock()
 	}
 	if endpoints == nil {
-		rc := s.commonRelay(pc.routes)
-		if rc == nil {
+		if rc := s.commonRelay(pc.routes); rc != nil {
+			rctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			eps, err := rc.RequestDirect(rctx, pc.siteID)
+			cancel()
+			if err != nil && pc.routes.Address == "" {
+				setErr(err.Error())
+				return
+			}
+			endpoints = eps
+		} else if pc.routes.Address == "" {
 			setErr("no relay in common to arrange a direct connection")
 			return
 		}
-		rctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		eps, err := rc.RequestDirect(rctx, pc.siteID)
-		cancel()
-		if err != nil {
-			setErr(err.Error())
-			return
-		}
-		endpoints = eps
+	}
+	// The peer's direct address is a candidate too: what a relay reports is
+	// the address it sees and the peer's own interfaces, which inside Docker
+	// are the container's, not the host's.
+	if pc.routes.Address != "" {
+		endpoints = append(endpoints, pc.routes.Address)
 	}
 	conn, ep, err := s.punchAndDial(ctx, tr, pc, endpoints)
 	if err != nil {

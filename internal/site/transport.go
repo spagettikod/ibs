@@ -45,6 +45,10 @@ func (s *Site) OwnRoutes() Routes {
 	return rt
 }
 
+// directRetryEvery is how often a peer reached through a relay is tried at
+// its direct address again.
+const directRetryEvery = time.Minute
+
 // Path kinds, from best to worst.
 const (
 	PathQUIC   = "quic"   // direct, hole punched or same network
@@ -118,6 +122,7 @@ type peerClient struct {
 	bps         float64
 	speedAt     time.Time
 	directTry   time.Time
+	directRetry time.Time // when the direct address was last tried while a relay worked
 	directFails int
 	directErr   string
 	tryingQUIC  bool
@@ -155,9 +160,13 @@ func (s *Site) peer(siteID string) (*peerClient, error) {
 	}
 	c := s.newPeerClient(siteID, ed25519.PublicKey(pub), routes)
 	if old := s.peerClients[siteID]; old != nil {
-		// Keep a working direct connection and the measurements.
+		// Keep a working direct connection and the measurements. A new or
+		// changed direct address is tried first, not the path that worked.
 		old.mu.Lock()
-		c.quic, c.rtt, c.bps, c.speedAt, c.active = old.quic, old.rtt, old.bps, old.speedAt, old.active
+		c.quic, c.rtt, c.bps, c.speedAt = old.quic, old.rtt, old.bps, old.speedAt
+		if old.routes.Address == routes.Address {
+			c.active = old.active
+		}
 		old.mu.Unlock()
 	}
 	s.peerClients[siteID] = c
@@ -237,7 +246,18 @@ func (pc *peerClient) paths() []peerPath {
 		}
 		out = append(out, peerPath{kind: PathRelay, relay: id, base: "https://peer.ibs", client: cl})
 	}
-	// Prefer the path that worked last (after QUIC, which is always best).
+	return pc.order(out, time.Now())
+}
+
+// order puts the path that worked last first (after QUIC, which is always
+// best), except that while a relay works, the direct address is tried again
+// now and then: it may have become reachable (it was just added, a VPN came
+// up, a port was opened) and is faster. pc.mu must be held.
+func (pc *peerClient) order(out []peerPath, now time.Time) []peerPath {
+	if pc.routes.Address != "" && strings.HasPrefix(pc.active, PathRelay) && now.Sub(pc.directRetry) > directRetryEvery {
+		pc.directRetry = now
+		return out
+	}
 	for i, p := range out {
 		if p.key() == pc.active && i > 0 && out[0].kind != PathQUIC {
 			out[0], out[i] = out[i], out[0]

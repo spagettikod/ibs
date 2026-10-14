@@ -3,6 +3,12 @@
 Each release says what to update and which launcher and relay it works with: IBS,
 the launcher and the relay are released separately.
 
+## Unreleased
+
+- Fixed: a direct address added while sites were connected through a relay wasn't used
+  until a restart. Sites on a relay now try the direct address again every minute, and
+  also use it for direct (QUIC) connections.
+
 ## 1.3.1
 
 **What to update:** sites, under **Settings → Updates**; nodes follow.
