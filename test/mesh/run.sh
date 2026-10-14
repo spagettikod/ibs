@@ -30,7 +30,8 @@ trap 'dc down -v --remove-orphans >/dev/null 2>&1' EXIT
 dc down -v --remove-orphans >/dev/null 2>&1
 dc up -d >/dev/null 2>&1 || { echo "cannot start the sites"; exit 1; }
 for s in site-a site-b site-c; do
-  check "$s starts"                              wait_for 180 bash -c "$(declare -f api dc); api $s GET /api/state | grep -q '\"authenticated\":true'"
+  check "$s starts"                              wait_for 180 bash -c "$(declare -f api dc); api $s GET /api/state | grep -q '\"authenticated\":true'" ||
+    { echo "        $s's log:"; dc logs --tail 15 "$s" 2>&1 | sed 's/^/        /'; }
 done
 
 echo "Joining"

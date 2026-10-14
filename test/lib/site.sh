@@ -46,6 +46,7 @@ check() {
     PASS=$((PASS + 1)); echo "  ok    $name"
   else
     FAIL=$((FAIL + 1)); FAILED+=("$name"); echo "  FAIL  $name"; echo "$out" | sed 's/^/        /' | tail -5
+    return 1
   fi
 }
 
