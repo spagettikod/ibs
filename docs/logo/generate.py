@@ -1,133 +1,148 @@
 #!/usr/bin/env python3
 """Generate every IBS logo asset from one definition.
 
-The mark: a floppy disk on a steel shield, in greyscale. Run from the
-repository root:
+The logo is a round mission patch: a blue planet below the band of the Milky
+Way, with one bright star, two retro stripes (red and yellow) arcing over the
+planet, and the name around the rim. Run from the repository root:
 
     python3 docs/logo/generate.py && rsvg-convert -w 1440 docs/logo/preview.svg -o docs/logo/preview.png
 
-Writes docs/logo/*.svg, web/public/favicon.svg and web/src/logo-paths.ts.
+Writes docs/logo/*.svg, web/public/favicon.svg and web/src/logo-paths.ts:
+
+    ibs-patch.svg  the full patch with "INTERGALACTIC BACKUP SYSTEM" around the
+                   rim, for large places (the README)
+    ibs-mark.svg   the badge without the rim text, for the web interface
+    favicon.svg    a simpler badge for 32 px and below (the browser tab)
 """
 import math
+import random
 
-ID = "ibsg-"  # prefix of gradient and filter ids; the web interface makes it unique per instance
+ID = "ibsg-"  # prefix of gradient and clip ids; the web interface makes it unique per instance
 
-
-def bez(p0, p1, p2, p3, n=24):
-    return [tuple((1 - t) ** 3 * a + 3 * (1 - t) ** 2 * t * b + 3 * (1 - t) * t ** 2 * c + t ** 3 * d
-                  for a, b, c, d in zip(p0, p1, p2, p3)) for t in [i / n for i in range(1, n + 1)]]
-
-
-def shield(inset=0.0, w=36):
-    """The shield outline (peaked top) as path data, optionally inset on every side."""
-    w, y0, bottom, shoulder = w - inset, 12 + inset, 94 - inset * 1.75, 40
-    l, r = 50 - w, 50 + w
-    pts = [(l, y0 + 6), (50, y0 - 3), (r, y0 + 6)]
-    pts += [(r, y0 + 6 + (shoulder - y0 - 6) * i / 10) for i in range(1, 11)]
-    k = (bottom - shoulder) / 54
-    pts += bez((r, shoulder), (r, shoulder + 30 * k), (50 + w * 0.5, shoulder + 42 * k), (50, bottom))
-    pts += bez((50, bottom), (50 - w * 0.5, shoulder + 42 * k), (l, shoulder + 30 * k), (l, shoulder))
-    pts += [(l, shoulder - (shoulder - y0 - 6) * i / 10) for i in range(1, 10)]
-    return "M" + "L".join(f"{x:.2f} {y:.2f}" for x, y in pts) + "Z"
+BLUE, NAVY, RED, YELLOW, WHITE, SKY = "#2456d6", "#0d1b4d", "#e3342f", "#f7c31a", "#ffffff", "#7fb2ff"
+FONT = 'font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-weight="800"'
 
 
-def disk_paths(x0=32, y0=27, s=36):
-    x1, y1, c = x0 + s, y0 + s, s * 0.16
-    body = (f"M{x0} {y0 + 2.5}Q{x0} {y0} {x0 + 2.5} {y0}L{x1 - c:.2f} {y0}L{x1} {y0 + c:.2f}L{x1} {y1 - 2.5}"
-            f"Q{x1} {y1} {x1 - 2.5} {y1}L{x0 + 2.5} {y1}Q{x0} {y1} {x0} {y1 - 2.5}Z")
-    sx0, sx1, sy1 = x0 + s * 0.24, x1 - s * 0.3, y0 + s * 0.34
-    shutter = f"M{sx0:.2f} {y0}H{sx1:.2f}V{sy1 - 1.5:.2f}Q{sx1:.2f} {sy1:.2f} {sx1 - 1.5:.2f} {sy1:.2f}H{sx0 + 1.5:.2f}Q{sx0:.2f} {sy1:.2f} {sx0:.2f} {sy1 - 1.5:.2f}Z"
-    hole = f"M{sx1 - s * 0.16:.2f} {y0 + s * 0.07:.2f}h{s * 0.09:.2f}v{s * 0.19:.2f}h{-s * 0.09:.2f}Z"
-    lx0, lx1, ly0 = x0 + s * 0.13, x1 - s * 0.13, y0 + s * 0.48
-    label = f"M{lx0:.2f} {y1}V{ly0 + 2:.2f}Q{lx0:.2f} {ly0:.2f} {lx0 + 2:.2f} {ly0:.2f}H{lx1 - 2:.2f}Q{lx1:.2f} {ly0:.2f} {lx1:.2f} {ly0 + 2:.2f}V{y1}Z"
-    lines = "".join(f"M{lx0 + 4:.2f} {ly0 + s * k:.2f}H{lx1 - 4:.2f}" for k in (0.12, 0.22, 0.32))
-    return body, shutter, hole, label, lines
+def stars(n, inside, seed, size):
+    """n stars at random spots where inside(x, y), the same every run."""
+    rnd, out = random.Random(seed), []
+    while len(out) < n:
+        x, y = rnd.uniform(4, 96), rnd.uniform(4, 96)
+        if inside(x, y):
+            out.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{rnd.uniform(*size):.2f}" fill="{WHITE}" opacity="{rnd.uniform(.55, 1):.2f}"/>')
+    return "".join(out)
 
 
-def gradient(name, stops):
-    return (f'<linearGradient id="{ID}{name}" x1="0" y1="0" x2="1" y2="1">'
-            + "".join(f'<stop offset="{o}" stop-color="{c}"/>' for o, c in stops) + "</linearGradient>")
+def star4(x, y, s):
+    """The bright four-pointed star."""
+    p = [(x, y - s), (x + s * .28, y - s * .28), (x + s, y), (x + s * .28, y + s * .28),
+         (x, y + s), (x - s * .28, y + s * .28), (x - s, y), (x - s * .28, y - s * .28)]
+    return f'<path d="M{"L".join(f"{a:.2f} {b:.2f}" for a, b in p)}Z" fill="{YELLOW}"/>'
 
 
-def steel(small=False):
-    """The full-colour mark. small drops the label lines and the shadow, for 32 px and below."""
-    body, shutter, hole, label, lines = disk_paths()
-    defs = (gradient("face", [(0, "#dfe2e6"), (0.55, "#a8aeb6"), (1, "#6c727b")])
-            + gradient("rim", [(0, "#f4f5f7"), (1, "#3f444c")])
-            + gradient("disk", [(0, "#4a5059"), (1, "#22262c")])
-            + gradient("shutter", [(0, "#f3f4f6"), (1, "#a9aeb6")]))
-    if not small:
-        defs += (f'<filter id="{ID}shadow" x="-20%" y="-20%" width="140%" height="140%">'
-                 '<feGaussianBlur in="SourceAlpha" stdDeviation="1.4"/><feOffset dx="1.2" dy="1.8"/>'
-                 '<feComponentTransfer><feFuncA type="linear" slope="0.45"/></feComponentTransfer>'
-                 '<feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge></filter>')
-    edge = "#15181c"
-    o = [f"<defs>{defs}</defs>",
-         f'<path d="{shield()}" fill="url(#{ID}face)" stroke="url(#{ID}rim)" stroke-width="{3.6 if small else 3}"/>']
-    if not small:
-        o.append(f'<path d="{shield(3.2)}" fill="none" stroke="#ffffff" stroke-opacity="0.55" stroke-width="0.8"/>')
-    o += [f'<g{"" if small else f" filter=\"url(#{ID}shadow)\""}>',
-          f'<path d="{body}" fill="url(#{ID}disk)" stroke="{edge}" stroke-width="0.8"/>',
-          f'<path d="{shutter}" fill="url(#{ID}shutter)" stroke="{edge}" stroke-width="0.6"/>',
-          f'<path d="{hole}" fill="#22262c"/>',
-          f'<path d="{label}" fill="#f1f2f4" stroke="{edge}" stroke-width="0.6"/>']
-    if not small:
-        o.append(f'<path d="{lines}" stroke="#c7cbd1" stroke-width="0.9" stroke-linecap="round"/>')
-    o.append("</g>")
-    return "".join(o)
+def scene(r, small=False):
+    """The view through the badge's window, a circle of radius r around (50, 50).
+    Drawn for r=31 and scaled to fit; small has fewer, larger stars."""
+    k = r / 31
+
+    def s(v):  # scale a coordinate about the centre
+        return 50 + (v - 50) * k
+
+    inside = lambda x, y: math.hypot(x - 50, y - 50) < r - 2
+    sky = lambda x, y: inside(x, y) and y < s(50)
+    band = lambda x, y: sky(x, y) and abs((y - s(34)) - 0.45 * (x - 50)) < 5 * k
+    out = [f'<defs><linearGradient id="{ID}mw" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="{SKY}" stop-opacity="0"/>'
+           f'<stop offset=".5" stop-color="#cfe0ff" stop-opacity="{.65 if small else .5}"/><stop offset="1" stop-color="{SKY}" stop-opacity="0"/></linearGradient>'
+           f'<clipPath id="{ID}win"><circle cx="50" cy="50" r="{r}"/></clipPath></defs>'
+           f'<circle cx="50" cy="50" r="{r}" fill="{NAVY}"/><g clip-path="url(#{ID}win)">',
+           f'<path d="M{s(10):.2f} {s(16):.2f}L{s(90):.2f} {s(52):.2f}L{s(90):.2f} {s(63):.2f}L{s(10):.2f} {s(27):.2f}Z" fill="url(#{ID}mw)"/>']
+    if small:
+        out.append(stars(7, band, 29, (0.9 * k, 1.4 * k)))
+    else:
+        out.append(stars(int(34 * k), band, 29, (0.3 * k, 0.8 * k)))
+        out.append(stars(int(6 * k), lambda x, y: sky(x, y) and not band(x, y), 31, (0.4 * k, 1.0 * k)))
+    out.append(star4(s(63), s(31), (5.5 if small else 4.5) * k))
+    out.append(f'<circle cx="50" cy="{s(104):.2f}" r="{44 * k:.2f}" fill="{BLUE}"/>'
+               f'<circle cx="50" cy="{s(104):.2f}" r="{44 * k:.2f}" fill="none" stroke="{SKY}" stroke-width="{1.5 * k:.2f}"/>')
+    w = (4.4 if small else 3.6) * k
+    for color, dy in ((RED, 0), (YELLOW, 5 if small else 5.5)):
+        out.append(f'<path d="M{s(14):.2f} {s(62 + dy):.2f}Q50 {s(26 + dy):.2f} {s(86):.2f} {s(54 + dy):.2f}" '
+                   f'fill="none" stroke="{color}" stroke-width="{w:.2f}" stroke-linecap="round"/>')
+    out.append("</g>")
+    return "".join(out)
 
 
-def flat():
-    """One colour (currentColor), for places that can't show greys."""
-    body, shutter, hole, label, _ = disk_paths()
-    line = 'fill="none" stroke="currentColor" stroke-linejoin="round"'
-    return (f'<path d="{shield()}" {line} stroke-width="2.6"/>'
-            f'<path d="{body}" {line} stroke-width="2.4"/>'
-            f'<path d="{shutter}" {line} stroke-width="1.9"/><path d="{hole}" fill="currentColor"/>'
-            f'<path d="{label}" {line} stroke-width="1.9"/>')
+# Advance widths of Helvetica Bold capitals, in 1/1000 em, to space the rim letters.
+WIDTHS = {"A": 722, "B": 722, "C": 722, "E": 667, "G": 778, "I": 278, "K": 722, "L": 611,
+          "M": 833, "N": 722, "P": 667, "R": 722, "S": 667, "T": 611, "U": 722, "Y": 667, " ": 278}
+
+
+def rim_text(text, r=36.3, size=7, spacing=1.1):
+    """text around the top of a circle, each letter placed and turned on its own,
+    so it shows in every SVG viewer (curved text, textPath, isn't supported everywhere)."""
+    adv = [WIDTHS[c] / 1000 * size + spacing for c in text]
+    angle = -(sum(adv) - spacing) / 2 / r  # radians; 0 is straight up
+    out = []
+    for c, a in zip(text, adv):
+        mid = angle + (a - spacing) / 2 / r
+        if c != " ":
+            x, y, deg = 50 + r * math.sin(mid), 50 - r * math.cos(mid), math.degrees(mid)
+            out.append(f'<text x="{x:.2f}" y="{y:.2f}" transform="rotate({deg:.2f} {x:.2f} {y:.2f})" text-anchor="middle">{c}</text>')
+        angle += a / r
+    return f'<g {FONT} font-size="{size}" fill="{WHITE}">{"".join(out)}</g>'
+
+
+def patch():
+    """The full patch: white edge, the name around the rim, the window."""
+    return (f'<circle cx="50" cy="50" r="48" fill="{WHITE}"/><circle cx="50" cy="50" r="45.5" fill="{NAVY}"/>'
+            + rim_text("INTERGALACTIC BACKUP SYSTEM")
+            + scene(31) + f'<circle cx="50" cy="50" r="31" fill="none" stroke="{WHITE}" stroke-width="2"/>')
+
+
+def badge(small=False):
+    """The badge without the rim text: just the window with a white edge."""
+    edge = 4.5 if small else 3
+    return f'<circle cx="50" cy="50" r="48" fill="{WHITE}"/>' + scene(48 - edge, small)
 
 
 def svg(body, w=100, h=100, size=""):
     return f'<svg xmlns="http://www.w3.org/2000/svg"{size} viewBox="0 0 {w} {h}">{body}</svg>\n'
 
 
-def place(m, x, y, size, color=None, tag=""):
+def place(m, x, y, size, tag=""):
     m = m.replace(ID, f"{ID}{tag}")
-    style = f' style="color:{color}"' if color else ""
-    return f'<g transform="translate({x},{y}) scale({size / 100})"{style}>{m}</g>'
+    return f'<g transform="translate({x},{y}) scale({size / 100})">{m}</g>'
 
 
 def main():
-    full, small = steel(), steel(small=True)
+    full, mark, small = patch(), badge(), badge(small=True)
     files = {
-        "docs/logo/ibs-mark.svg": svg(full),
-        "docs/logo/ibs-mark-small.svg": svg(small),
-        "docs/logo/ibs-mark-flat.svg": svg(f'<g style="color:#111318">{flat()}</g>'),
+        "docs/logo/ibs-patch.svg": svg(full),
+        "docs/logo/ibs-mark.svg": svg(mark),
         "docs/logo/favicon.svg": svg(small),
         "web/public/favicon.svg": svg(small),
         "web/src/logo-paths.ts": "// Generated by docs/logo/generate.py — do not edit.\n"
-                                 f"export const idPrefix = {ID!r}\nexport const fullMark = {full!r}\nexport const smallMark = {small!r}\n",
+                                 f"export const idPrefix = {ID!r}\nexport const fullMark = {mark!r}\nexport const smallMark = {small!r}\n",
     }
 
-    # Preview sheet: on dark and light, wordmark lockups, small sizes, and the flat version.
+    # Preview sheet: the patch on dark and light, the sidebar lockup, and the small sizes.
     dark, ink = "#0b1020", "#111318"
     font = 'font-family="Helvetica Neue, Helvetica, Arial, sans-serif"'
     o = ['<rect width="720" height="520" fill="#fff"/>',
-         f'<rect x="30" y="20" width="320" height="220" rx="18" fill="{dark}"/>' + place(full, 110, 50, 160, tag="a"),
-         '<rect x="370" y="20" width="320" height="220" rx="18" fill="#fff" stroke="#d5d8de"/>' + place(full, 450, 50, 160, tag="b")]
+         f'<rect x="30" y="20" width="320" height="220" rx="18" fill="{dark}"/>' + place(full, 100, 30, 180, tag="a"),
+         '<rect x="370" y="20" width="320" height="220" rx="18" fill="#fff" stroke="#d5d8de"/>' + place(full, 440, 30, 180, tag="b")]
     for i, (x, bg, fg, st) in enumerate(((30, dark, "#fff", ""), (370, "#fff", ink, ' stroke="#d5d8de"'))):
-        o += [f'<rect x="{x}" y="260" width="320" height="120" rx="18" fill="{bg}"{st}/>', place(full, x + 40, 280, 80, tag=f"c{i}"),
-              f'<text x="{x + 136}" y="334" {font} font-size="48" font-weight="700" letter-spacing="5" fill="{fg}">IBS</text>',
-              f'<text x="{x + 138}" y="356" {font} font-size="12" fill="{fg}" opacity="0.7">Intergalactic Backup System</text>']
+        o += [f'<rect x="{x}" y="260" width="320" height="120" rx="18" fill="{bg}"{st}/>', place(mark, x + 40, 280, 80, tag=f"c{i}"),
+              f'<text {font} font-size="21" font-weight="700" letter-spacing="1" fill="{fg}">'
+              f'<tspan x="{x + 136}" y="300">Intergalactic</tspan><tspan x="{x + 136}" y="326">Backup</tspan><tspan x="{x + 136}" y="352">System</tspan></text>']
     x = 40
     for i, size in enumerate((64, 48, 32, 24, 16)):
-        m = full if size > 32 else small
+        m = mark if size > 32 else small
         o += [f'<rect x="{x}" y="{430 - size / 2}" width="{size}" height="{size}" rx="{size * 0.22}" fill="{dark}"/>',
               place(m, x + size * 0.06, 430 - size / 2 + size * 0.06, size * 0.88, tag=f"d{i}"),
               place(m, x + size + 12, 430 - size / 2, size, tag=f"e{i}")]
         x += 2 * size + 40
-    o += [place(flat(), 600, 398, 64, ink),
-          f'<text x="40" y="490" {font} font-size="12" fill="#687082">Tab icon and mark at 64 / 48 / 32 / 24 / 16 px; flat one-colour version on the right</text>']
+    o += [f'<text x="40" y="490" {font} font-size="12" fill="#687082">Badge and tab icon at 64 / 48 / 32 / 24 / 16 px; the patch with the rim text is for large places</text>']
     files["docs/logo/preview.svg"] = svg("".join(o), 720, 520, ' width="1440" height="1040"')
 
     for path, content in files.items():

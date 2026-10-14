@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/logo/ibs-mark.svg" width="96" alt="IBS logo: a floppy disk on a steel shield">
+  <img src="docs/logo/ibs-patch.svg" width="200" alt="IBS logo: a round mission patch with a planet under the Milky Way and the name Intergalactic Backup System around the rim">
 </p>
 
 # IBS — Intergalactic Backup System

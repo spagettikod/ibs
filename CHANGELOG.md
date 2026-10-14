@@ -8,6 +8,8 @@ the launcher and the relay are released separately.
 - **The browser tab shows the site's name**, e.g. "roland-001 - IBS".
 - **IBS network is now called The Known Universe.**
 - The network map shows only the ping on each connection; the speed is in its details.
+- **A new logo:** a retro mission patch with a planet under the Milky Way. The web
+  interface and the browser tab use the badge; the README shows the full patch.
 - **The sidebar** shows "Intergalactic Backup System" next to the logo, and the site name
   set apart from the menu.
 - **After a wrong password** the login page selects it, so the next one can be typed

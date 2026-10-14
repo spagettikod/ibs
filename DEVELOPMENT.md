@@ -174,6 +174,8 @@ Settings go in `/etc/ibs/*.env`.
 ## Logo
 
 `python3 docs/logo/generate.py` regenerates every logo file from one definition: the
-steel mark, a simplified version for 32 px and below (also the favicon), a flat
-one-colour version, the paths the UI uses, and `docs/logo/preview.svg`
-(`rsvg-convert -w 1440 docs/logo/preview.svg -o docs/logo/preview.png` for the PNG).
+mission patch with the name around the rim (`ibs-patch.svg`, used in the README), the
+badge without it (`ibs-mark.svg`, the web interface), a simpler badge for 32 px and below
+(the favicon), the shapes the UI draws (`web/src/logo-paths.ts`), and
+`docs/logo/preview.svg` (`rsvg-convert -w 1440 docs/logo/preview.svg -o
+docs/logo/preview.png` for the PNG).
