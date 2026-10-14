@@ -11,7 +11,7 @@ import (
 // Topics announced to admin UI subscribers when state changes.
 const (
 	TopicData        = "data"        // buckets, objects, keys, settings
-	TopicPeers       = "peers"       // pairing, peer status, IBS network
+	TopicPeers       = "peers"       // pairing, peer status, the known universe
 	TopicNodes       = "nodes"       // storage nodes
 	TopicReplication = "replication" // replica counts, held blocks, healing
 	// TopicScrub ("scrub", scrub.go): scrub progress and findings.

@@ -36,22 +36,22 @@ function attention(d: Dashboard, tls?: TLSStatus, updates?: UpdatesInfo, scrub?:
     out.push({ level: 'bad', text: `Storage is almost full: ${fmtBytes(d.site.free)} free`, href: '#/nodes', link: 'Nodes' })
   }
   for (const rl of d.relays ?? []) {
-    if (!rl.connected) out.push({ level: 'warn', text: `Relay ${rl.name} is not connected`, href: '#/network', link: 'IBS network' })
+    if (!rl.connected) out.push({ level: 'warn', text: `Relay ${rl.name} is not connected`, href: '#/network', link: 'The Known Universe' })
   }
   for (const p of d.peers ?? []) {
-    if (!p.online) out.push({ level: 'warn', text: `Site ${p.name} is offline (seen ${ago(p.last_seen)})`, href: '#/network', link: 'IBS network' })
+    if (!p.online) out.push({ level: 'warn', text: `Site ${p.name} is offline (seen ${ago(p.last_seen)})`, href: '#/network', link: 'The Known Universe' })
   }
   if (c.sites > 0 && c.sites < c.copies) {
-    out.push({ level: 'warn', text: `Files have ${c.sites} of ${c.copies} copies on other sites: only ${c.sites} other ${c.sites === 1 ? 'site is' : 'sites are'} online`, href: '#/network', link: 'IBS network' })
+    out.push({ level: 'warn', text: `Files have ${c.sites} of ${c.copies} copies on other sites: only ${c.sites} other ${c.sites === 1 ? 'site is' : 'sites are'} online`, href: '#/network', link: 'The Known Universe' })
   } else if (!c.fits) {
     out.push({ level: 'warn', text: `Not enough space on other sites for all copies (${fmtBytes(c.needed)} to copy)`, href: '#/buckets', link: 'Buckets' })
   } else if (r.under_replicated > 0) {
     out.push({ level: 'info', text: `${r.under_replicated} blocks are being copied to other sites`, href: '#/buckets', link: 'Buckets' })
   }
   if (!d.site.peer_advertise && (d.relays ?? []).length === 0) {
-    out.push({ level: 'warn', text: 'Other sites cannot reach this site: add a relay', href: '#/network', link: 'IBS network' })
+    out.push({ level: 'warn', text: 'Other sites cannot reach this site: add a relay', href: '#/network', link: 'The Known Universe' })
   } else if ((d.peers ?? []).length === 0) {
-    out.push({ level: 'warn', text: 'No backups yet: this site isn\'t connected to another site, so no copies are made', href: '#/network', link: 'IBS network' })
+    out.push({ level: 'warn', text: 'No backups yet: this site isn\'t connected to another site, so no copies are made', href: '#/network', link: 'The Known Universe' })
   }
   const rank = { bad: 0, warn: 1, info: 2 }
   return out.sort((a, b) => rank[a.level] - rank[b.level])
@@ -142,7 +142,7 @@ export default function DashboardPage() {
             ))}
           </ul>
         </Card>
-        <Card title="Network" actions={<div className="row"><ViewSwitch view={view} onChange={setView} /><a className="btn small" href="#/network">Details</a></div>}>
+        <Card title="The Known Universe" actions={<div className="row"><ViewSwitch view={view} onChange={setView} /><a className="btn small" href="#/network">Details</a></div>}>
           {network.length === 0 ? (
             <p className="muted small">Not connected to other sites yet.</p>
           ) : (

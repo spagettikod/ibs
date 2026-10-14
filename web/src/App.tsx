@@ -16,7 +16,7 @@ import SettingsPage, { SETTINGS_SECTIONS, settingsSection } from './pages/Settin
 const pages = {
   dashboard: { label: 'Dashboard', component: DashboardPage },
   buckets: { label: 'Buckets', component: BucketsPage },
-  network: { label: 'IBS network', component: NetworkPage },
+  network: { label: 'The Known Universe', component: NetworkPage },
   nodes: { label: 'Nodes', component: NodesPage },
   scrub: { label: 'Scrub', component: ScrubPage },
   keys: { label: 'Access keys', component: KeysPage },

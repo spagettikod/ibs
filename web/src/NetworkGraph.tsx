@@ -137,7 +137,7 @@ export default function NetworkGraph({ selfId, selfName, selfUpSince, sites, lin
 
   return (
     <div className="netgraph" ref={ref}>
-      <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} role="img" aria-label="Map of the IBS network">
+      <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} role="img" aria-label="Map of the known universe">
         {uplinks.map((u) => {
           const a = node(u.from)
           const r = relayOf(u.relay)
@@ -153,7 +153,7 @@ export default function NetworkGraph({ selfId, selfName, selfUpSince, sites, lin
               <path d={g.d} className="hit" />
               <path d={g.d} className="line" />
               {mine && e.link.online && e.link.kind && (() => {
-                const text = fmtMs(e.link.rtt_ms) + (e.link.bps > 0 ? ` · ${fmtSpeed(e.link.bps)}` : '')
+                const text = fmtMs(e.link.rtt_ms) // speed only in the details: it crowds the graph
                 const w = 14 + text.length * 6.4
                 return (
                   <g transform={`translate(${g.lx},${g.ly})`} className="edge-label">

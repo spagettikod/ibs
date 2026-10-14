@@ -6,6 +6,8 @@ the launcher and the relay are released separately.
 ## Unreleased
 
 - **The browser tab shows the site's name**, e.g. "roland-001 - IBS".
+- **IBS network is now called The Known Universe.**
+- The network map shows only the ping on each connection; the speed is in its details.
 - Fixed: after renaming the site, the sidebar showed the old name until a reload.
 
 ## 1.3.2

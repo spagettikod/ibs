@@ -42,7 +42,7 @@ export default function NetworkPage() {
     <div className="page">
       <header className="page-head">
         <div>
-          <h1>IBS network</h1>
+          <h1>The Known Universe</h1>
           <p className="muted small">Sites connect directly when they can, otherwise through a relay.</p>
         </div>
         <div className="page-actions">

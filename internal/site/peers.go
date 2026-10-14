@@ -593,7 +593,7 @@ func (s *Site) CreateInvite() (string, error) {
 	addr := s.Setting("peer_advertise")
 	relays := s.relayTokens()
 	if addr == "" && len(relays) == 0 {
-		return "", errors.New("other sites cannot reach this site yet: add a relay or set a direct address on the IBS network page")
+		return "", errors.New("other sites cannot reach this site yet: add a relay or set a direct address on The Known Universe page")
 	}
 	secret := keys.RandomToken(24)
 	now := time.Now()
@@ -654,7 +654,7 @@ func (s *Site) JoinWithInvite(ctx context.Context, token string) (*PeerInfo, err
 	}
 	own := s.OwnRoutes()
 	if own.empty() {
-		return nil, errors.New("other sites cannot reach this site yet: add a relay or set a direct address on the IBS network page")
+		return nil, errors.New("other sites cannot reach this site yet: add a relay or set a direct address on The Known Universe page")
 	}
 	siteID := keys.SiteID(pub)
 	pc := s.newPeerClient(siteID, pub, routes)

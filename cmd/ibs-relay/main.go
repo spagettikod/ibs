@@ -78,7 +78,7 @@ func main() {
 	if advertise == "" {
 		advertise = "<this machine's public address>:" + port(addr)
 	}
-	slog.Info("add this relay to a site under IBS network > Add relay; print its token with: ibs-relay token",
+	slog.Info("add this relay to a site under The Known Universe > Add relay; print its token with: ibs-relay token",
 		"address", advertise)
 	if out := os.Getenv("IBS_RELAY_TOKEN_OUT"); out != "" {
 		write := func(token string) {

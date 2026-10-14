@@ -78,7 +78,7 @@ IBS runs in Docker. Choose your case; the ports each machine needs are under
 2. Open `http://<host>:8080`, choose **Create new site**, and pick a name and an admin
    password. **Write down the recovery phrase.** It's shown only once.
 
-3. **IBS network → Join a site:** paste the invite. Your site connects to every site in
+3. **The Known Universe → Join a site:** paste the invite. Your site connects to every site in
    the IBS, through their relays. That's it.
 
 </details>
@@ -157,10 +157,10 @@ IBS runs in Docker. Choose your case; the ports each machine needs are under
 3. Open `http://<host>:8080`, choose **Create new site**, and pick a name and an admin
    password. **Write down the recovery phrase.** It's shown only once.
 
-4. **IBS network → Add relay:** enter the relay's address (e.g.
+4. **The Known Universe → Add relay:** enter the relay's address (e.g.
    `relay.example.com:7444`) and token.
 
-5. **IBS network → Invite a site** for each site that should join, and send the invite to
+5. **The Known Universe → Invite a site** for each site that should join, and send the invite to
    its admin.
 
 </details>
@@ -245,7 +245,7 @@ How much of each node's disk IBS may use is set under **Nodes → Change**, or w
 
 Sites that can reach each other's port 7443 (TCP and UDP) connect directly instead of
 through a relay: on the same LAN, over a VPN such as WireGuard or Tailscale, or through
-a port forward. **IBS network** shows which way each site is connected.
+a port forward. **The Known Universe** shows which way each site is connected.
 
 How sites find each other's addresses:
 
@@ -255,8 +255,8 @@ How sites find each other's addresses:
 - **A guess.** A site also offers the name you open its web interface with, plus port
   7443: a site opened at `http://192.168.1.20:8080` is tried at `192.168.1.20:7443`. It's
   a guess; behind a reverse proxy or a VPN name it may be wrong, which only costs a
-  failed attempt. **IBS network → Direct address** shows the current guess.
-- **A direct address you set.** The reliable way: on each site, **IBS network → Direct
+  failed attempt. **The Known Universe → Direct address** shows the current guess.
+- **A direct address you set.** The reliable way: on each site, **The Known Universe → Direct
   address → Edit**, e.g. `192.168.1.20:7443` or the site's VPN address (or set
   `IBS_PEER_ADVERTISE`). Every site in the IBS learns it, and invites carry it.
 
@@ -432,7 +432,7 @@ are. Blocks that were on the manager itself are fetched from other sites.
 
 - **Storage nodes:** restart them with the new `IBS_MANAGER`.
 - **Other sites:** reach it through the relay again on their own.
-- **Direct address:** if you set one, update it under **IBS network → Direct address**.
+- **Direct address:** if you set one, update it under **The Known Universe → Direct address**.
 
 </details>
 
@@ -479,7 +479,7 @@ Direct connections keep working. Connections through the relay stop, and sites k
 retrying it. To move to a new relay:
 
 1. Run a new one (step 1 of Setup).
-2. Add it on every site with **IBS network → Add relay**.
+2. Add it on every site with **The Known Universe → Add relay**.
 3. Remove the old one there.
 
 Sites find each other again on their own; no new invites are needed. Tip: use two
@@ -500,7 +500,7 @@ get the new token automatically, so their invites stay valid.
 
 <details><summary><b>The relay moved to a new address</b></summary>
 
-On each site, **IBS network → Relays → Edit address** next to the relay. The token
+On each site, **The Known Universe → Relays → Edit address** next to the relay. The token
 stays the same.
 
 </details>
@@ -596,12 +596,12 @@ it, sharing relays where needed.
 
 Yes. Under **Settings → Location**, click roughly where the site is. Every site in the
 IBS sees that spot, so pick a general area such as your town, not your address.
-**IBS network** and the dashboard then switch between **Diagram** and **Map**. The map images come from OpenStreetMap; nothing about your IBS
+**The Known Universe** and the dashboard then switch between **Diagram** and **Map**. The map images come from OpenStreetMap; nothing about your IBS
 is sent there.
 
 **Can I remove a site from the IBS?**
 
-No, only a site can take itself out: **IBS network → Leave the IBS**. Every site then
+No, only a site can take itself out: **The Known Universe → Leave the IBS**. Every site then
 forgets it and deletes the copies it kept for it, and makes new copies of its own data
 on the remaining sites. The site that left deletes the copies it kept for others; its
 own files stay. Sites that were offline find out when they come back. It can join again
