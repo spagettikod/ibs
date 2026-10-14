@@ -1,11 +1,11 @@
 # syntax=docker/dockerfile:1
 #
 # Images from one build:
-#   docker build -t ibs .                              IBS built in, for local development and the test
-#                                                      suites only (not published)
-#   docker build -t ibs-launcher --target launcher .   published: the IBS launcher, which downloads and
+#   docker build -t ibs .                              the "dev" stage: IBS built in, for development,
+#                                                      the test suites and the demo only (not published)
+#   docker build -t ibs-launcher --target launcher .   published as ibs/launcher: the IBS launcher, which downloads and
 #                                                      runs signed IBS versions kept in /data
-#   docker build -t ibs-relay --target relay .         published: relay only (no UI, no storage code)
+#   docker build -t ibs-relay --target relay .         published as ibs/relay: relay only (no UI, no storage code)
 # The UI and Go binaries are built on the build machine's own platform and
 # cross-compiled for the target (e.g. --platform linux/amd64), so building
 # images for another architecture needs no emulation.
@@ -52,7 +52,11 @@ ENV IBS_BIN=ibs-launcher
 # 8080 admin UI, 9000 S3, 7443 site-to-site (TCP, and UDP for direct QUIC), 7480 storage node
 EXPOSE 8080 9000 7443/tcp 7443/udp 7480
 
-FROM base AS ibs
+# For development, the test suites and the local demo only; never published. It
+# has IBS built in, so a build from the current source runs without the launcher,
+# signing or a GitHub release. As the last stage, it's what a plain
+# "docker build -t ibs ." builds. Sites and nodes run the launcher image.
+FROM base AS dev
 COPY --from=build /out/ibs /usr/local/bin/ibs
 # 8080 admin UI, 9000 S3, 7443 site-to-site (TCP, and UDP for direct QUIC), 7480 storage node
 EXPOSE 8080 9000 7443/tcp 7443/udp 7480
