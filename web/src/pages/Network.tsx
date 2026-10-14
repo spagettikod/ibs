@@ -54,7 +54,7 @@ export default function NetworkPage() {
       <ErrorBox error={error} />
 
       {data && data.network.length > 0 && (
-        <Card title="The IBS" actions={<ViewSwitch view={view} onChange={setView} />}>
+        <Card actions={<ViewSwitch view={view} onChange={setView} />}>
           <NetworkView view={view} self={{ id: data.site.site_id, name: data.site.name, location: data.site.location }}
             upSince={data.site.up_since} sites={data.network} links={data.links ?? []} relays={data.relay_nodes ?? []} />
         </Card>
