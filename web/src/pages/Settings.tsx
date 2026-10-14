@@ -59,6 +59,7 @@ function SiteSettings({ section }: { section: 'general' }) {
       const saved = await api<Settings>('PUT', '/api/settings', form)
       setForm(saved)
       setMsg('Saved')
+      window.dispatchEvent(new Event('ibs:renamed')) // the sidebar and tab title show the name
     } catch (err) {
       setSaveError((err as Error).message)
     }

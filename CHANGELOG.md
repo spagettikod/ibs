@@ -3,6 +3,11 @@
 Each release says what to update and which launcher and relay it works with: IBS,
 the launcher and the relay are released separately.
 
+## Unreleased
+
+- **The browser tab shows the site's name**, e.g. "roland-001 - IBS".
+- Fixed: after renaming the site, the sidebar showed the old name until a reload.
+
 ## 1.3.2
 
 **What to update:** sites, under **Settings → Updates**; nodes follow.

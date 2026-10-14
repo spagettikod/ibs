@@ -45,8 +45,17 @@ export default function App() {
       setState((s) => (s ? { ...s, authenticated: false } : s))
     }
     window.addEventListener('ibs:logout', onLogout)
-    return () => window.removeEventListener('ibs:logout', onLogout)
+    window.addEventListener('ibs:renamed', refresh)
+    return () => {
+      window.removeEventListener('ibs:logout', onLogout)
+      window.removeEventListener('ibs:renamed', refresh)
+    }
   }, [])
+
+  // The tab shows which site this is: "roland-001 - IBS".
+  useEffect(() => {
+    document.title = state?.site_name ? `${state.site_name} - IBS` : 'IBS'
+  }, [state?.site_name])
 
   if (!state) return <div className="center"><ErrorBox error={error} />{!error && <p className="muted">Loading…</p>}</div>
   return (
