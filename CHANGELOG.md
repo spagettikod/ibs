@@ -3,11 +3,19 @@
 Each release says what to update and which launcher and relay it works with: IBS,
 the launcher and the relay are released separately.
 
-## Unreleased
+## 1.3.2
 
-- Fixed: a direct address added while sites were connected through a relay wasn't used
-  until a restart. Sites on a relay now try the direct address again every minute, and
-  also use it for direct (QUIC) connections.
+**What to update:** sites, under **Settings → Updates**; nodes follow.
+
+**Works with:** launcher 1.0.0, relay 1.2.0 or newer.
+
+- **Sites on the same LAN find each other in Docker:** a site offers the name its web
+  interface is opened with as a guess at its LAN address (shown under **IBS network →
+  Direct address**).
+- Fixed: a direct address added while sites were connected through a relay was only
+  used after a restart.
+- Fixed: after the site restarted, the web interface could show "Reconnecting" until
+  the page was reloaded.
 
 ## 1.3.1
 

@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -157,8 +158,38 @@ func (s *Site) localEndpoints() []string {
 			out = append(out, net.JoinHostPort(ipn.IP.String(), strconv.Itoa(port)))
 		}
 	}
+	if h := s.Setting("web_host"); h != "" {
+		out = append(out, net.JoinHostPort(h, strconv.Itoa(port)))
+	}
 	return out
 }
+
+// NoteWebHost remembers the host the web interface was opened with. Inside
+// Docker a site only knows its container's addresses, so this is offered to
+// other sites as a guess at its address on the LAN: a site opened at
+// 192.168.1.20:8080 is probably reachable at 192.168.1.20:7443. A wrong
+// guess (a reverse proxy, a VPN name) only costs a failed attempt.
+func (s *Site) NoteWebHost(hostport string) {
+	host, _, err := net.SplitHostPort(hostport)
+	if err != nil {
+		host = hostport
+	}
+	host = strings.Trim(strings.ToLower(host), "[]")
+	if ip := net.ParseIP(host); host == "" || host == "localhost" || strings.HasSuffix(host, ".localhost") ||
+		(ip != nil && (ip.IsLoopback() || ip.IsUnspecified() || ip.IsLinkLocalUnicast())) {
+		return
+	}
+	s.netMu.Lock()
+	same := s.webHost == host
+	s.webHost = host
+	s.netMu.Unlock()
+	if !same && s.Setting("web_host") != host {
+		s.SetSetting("web_host", host)
+	}
+}
+
+// WebHost is the guessed LAN host (see NoteWebHost), "" when unknown.
+func (s *Site) WebHost() string { return s.Setting("web_host") }
 
 // relayedConn marks connections that arrived through a relay.
 type relayedConn struct {

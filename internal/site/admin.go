@@ -150,6 +150,7 @@ type Dashboard struct {
 		Offered       int64     `json:"offered"`
 		Generation    int64     `json:"generation"`
 		PeerAdvertise string    `json:"peer_advertise"`
+		WebHost       string    `json:"web_host,omitempty"` // guessed LAN host (NoteWebHost)
 		Buckets       int64     `json:"buckets"`
 		Objects       int64     `json:"objects"`
 		ObjectBytes   int64     `json:"object_bytes"`
@@ -177,6 +178,7 @@ func (s *Site) Dashboard() (*Dashboard, error) {
 	_, d.Site.Offered = s.offeredStorage()
 	d.Site.Generation = s.SettingInt("generation")
 	d.Site.PeerAdvertise = s.Setting("peer_advertise")
+	d.Site.WebHost = s.WebHost()
 	d.Site.Restored = s.SettingInt("restored")
 	d.Site.Location = s.Location()
 	s.DB.QueryRow(`SELECT COUNT(*) FROM buckets`).Scan(&d.Site.Buckets)

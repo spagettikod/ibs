@@ -72,7 +72,7 @@ export type NetSite = {
 export type Dashboard = {
   site: {
     site_id: string; name: string; up_since: number; capacity: number; free: number; offered: number
-    generation: number; peer_advertise: string; buckets: number; objects: number; object_bytes: number
+    generation: number; peer_advertise: string; web_host?: string; buckets: number; objects: number; object_bytes: number
     held_blocks: number; held_bytes: number; restored: number; location?: Location
   }
   replication: {

@@ -36,3 +36,27 @@ func TestDirectAddressIsRetried(t *testing.T) {
 		t.Fatalf("relay order: %s", got)
 	}
 }
+
+// The host the web interface is opened with is offered as a guess at the
+// site's LAN address; local-only names are not.
+func TestWebHostGuess(t *testing.T) {
+	s := newTestSite(t)
+	for _, h := range []string{"localhost:8080", "127.0.0.1:8080", "[::1]:8080", "ibs.localhost:8080", "[fe80::1]:8080", ""} {
+		s.NoteWebHost(h)
+		if g := s.WebHost(); g != "" {
+			t.Fatalf("%q was taken as a LAN address: %q", h, g)
+		}
+	}
+	s.NoteWebHost("192.168.1.20:8080")
+	if g := s.WebHost(); g != "192.168.1.20" {
+		t.Fatalf("guess %q, want 192.168.1.20", g)
+	}
+	s.NoteWebHost("IBS.int.Example.com")
+	if g := s.WebHost(); g != "ibs.int.example.com" {
+		t.Fatalf("guess %q, want the name in lower case", g)
+	}
+	s.NoteWebHost("localhost:8080") // a local visit doesn't replace a good guess
+	if g := s.WebHost(); g != "ibs.int.example.com" {
+		t.Fatalf("guess %q after a local visit", g)
+	}
+}

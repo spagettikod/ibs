@@ -549,6 +549,7 @@ func (s *Server) authed(h handler) http.HandlerFunc {
 			writeErr(w, &apiError{http.StatusForbidden, "missing X-IBS header"})
 			return
 		}
+		st.NoteWebHost(r.Host)
 		if err := h(w, r, st); err != nil {
 			writeErr(w, err)
 		}

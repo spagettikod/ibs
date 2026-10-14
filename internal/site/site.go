@@ -63,6 +63,7 @@ type Site struct {
 	quicTr  *quic.Transport
 	relays  map[string]*relayEntry
 	relayed *connQueue
+	webHost string // last host the web interface was opened with (NoteWebHost)
 
 	linksMu sync.Mutex
 	links   map[string]Link // learned from other sites

@@ -86,7 +86,7 @@ IBS runs in Docker. Choose your case; the ports each machine needs are under
 <details><summary><b>I'm starting a new IBS</b></summary>
 
 1. **Run a relay** on a machine with a public address (skip it if your sites can
-   [reach each other directly](#without-a-relay)):
+   [reach each other directly](#direct-connections)):
 
    With docker run:
 
@@ -241,24 +241,27 @@ services:
 How much of each node's disk IBS may use is set under **Nodes → Change**, or with
 `IBS_STORAGE_LIMIT` on the node. A node gets IBS, and every update, from its manager.
 
-### Without a relay
+### Direct connections
 
-Sites that can reach each other's port 7443 (TCP and UDP) can connect without a relay:
-on the same LAN, over a VPN such as WireGuard or Tailscale, or through a port forward.
+Sites that can reach each other's port 7443 (TCP and UDP) connect directly instead of
+through a relay: on the same LAN, over a VPN such as WireGuard or Tailscale, or through
+a port forward. **IBS network** shows which way each site is connected.
 
-1. On **each** site, set **IBS network → Direct address → Edit** to the address the
-   other sites can use, e.g. `192.168.1.20:7443` or the site's VPN address (or set
-   `IBS_PEER_ADVERTISE`). Both sides need one: each site connects to the other.
-2. Pair them as usual with **Invite a site** and **Join a site**. The invite carries the
-   direct address instead of a relay.
+How sites find each other's addresses:
 
-A site can't find this address by itself: from inside (in Docker, especially) it only
-sees its own internal address, not its LAN, VPN or forwarded address. Invites carry the
-address you enter, and every site in the IBS learns it as a way to reach this site.
+- **Through a shared relay.** Each site tells the relay its own addresses, and the
+  relay passes them on. Inside Docker a site only knows its container's address, so
+  this rarely works between two Docker hosts on the same LAN.
+- **A guess.** A site also offers the name you open its web interface with, plus port
+  7443: a site opened at `http://192.168.1.20:8080` is tried at `192.168.1.20:7443`. It's
+  a guess; behind a reverse proxy or a VPN name it may be wrong, which only costs a
+  failed attempt. **IBS network → Direct address** shows the current guess.
+- **A direct address you set.** The reliable way: on each site, **IBS network → Direct
+  address → Edit**, e.g. `192.168.1.20:7443` or the site's VPN address (or set
+  `IBS_PEER_ADVERTISE`). Every site in the IBS learns it, and invites carry it.
 
-A site can have both a direct address and relays; it uses whichever works. Even with
-only relays, sites that can reach each other connect directly and use the relay only
-as a fallback.
+Without any relay, set a direct address on **each** site and pair them as usual with
+**Invite a site** and **Join a site**.
 
 ## Configuration
 
@@ -332,7 +335,7 @@ Environment variables. All are optional.
 | Relay | 7444 TCP and UDP | The internet: the only port to forward |
 | Manager | 8080 TCP (web interface) | You, on your LAN |
 | | 9000 TCP (S3) | Your S3 clients, on your LAN |
-| | 7443 TCP and UDP | Your storage nodes, on your LAN. Other sites only when you use a [direct address](#without-a-relay); otherwise don't forward it on your router. |
+| | 7443 TCP and UDP | Your storage nodes, on your LAN. Other sites only when you use a [direct address](#direct-connections); otherwise don't forward it on your router. |
 | Storage node | 7480 TCP | Its manager, on your LAN |
 
 ## How your data is protected

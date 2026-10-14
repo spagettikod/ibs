@@ -129,6 +129,12 @@ export default function NetworkPage() {
         {data?.site.peer_advertise
           ? <p>Other sites can also reach this site at <span className="mono">{data.site.peer_advertise}</span>.</p>
           : <p className="muted small">None. Other sites reach this site through its relays, and connect directly on their own when the routers allow it.</p>}
+        {data?.site.web_host && (
+          <p className="muted small">
+            Other sites also try <span className="mono">{data.site.web_host}:7443</span>, the name this page was opened with.
+            That's a guess at this site's address on your network; set a direct address if it's wrong.
+          </p>
+        )}
       </Card>
 
       {indirect.length > 0 && (
@@ -319,8 +325,9 @@ function AddressDialog({ current, onClose, onDone }: { current: string; onClose:
         <p className="muted small">
           Optional. Only needed when other sites can reach this site's port 7443 at a fixed address: on the same network,
           over a VPN such as WireGuard or Tailscale, or through a port forward. This site can't find that address by itself
-          (from inside it only sees its own internal address), so enter it here. Invites carry it, and every site in the IBS
-          learns it as a way to reach this site. Leave it empty to use relays only.
+          (inside Docker it only sees its container's address), so enter it here. Invites carry it, and every site in the IBS
+          learns it as a way to reach this site. Without one, this site still offers the name this page is opened with as a
+          guess.
         </p>
         <label>
           Address
