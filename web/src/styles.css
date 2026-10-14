@@ -70,7 +70,10 @@ h2 { font-size: 15px; margin: 0; }
 }
 .sidebar-top { display: flex; align-items: center; justify-content: space-between; }
 .sidebar .logo { color: #fff; }
-.site-name { margin: 14px 8px 18px; font-size: 13px; color: #fff; opacity: 0.85; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.site-name { margin: 16px 0 14px; padding: 10px 8px; border-top: 1px solid rgba(255, 255, 255, 0.1); border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 14px; font-weight: 600; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.site-name small { display: block; font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.5; margin-bottom: 2px; }
+.logo.stacked span { letter-spacing: 0.04em; font-weight: 700; }
 .sidebar nav { display: flex; flex-direction: column; gap: 2px; }
 .sidebar nav a { color: var(--sidebar-text); padding: 8px 10px; border-radius: 7px; }
 .sidebar nav a:hover { background: rgba(255, 255, 255, 0.06); text-decoration: none; }

@@ -17,8 +17,17 @@ export function Mark({ size = 28, title }: { size?: number; title?: string }) {
   )
 }
 
-/** Mark plus "IBS" wordmark. */
-export function Logo({ size = 28 }: { size?: number }) {
+/** Mark plus the name: "IBS", or with stacked, "Intergalactic Backup System"
+ *  on three lines as tall as the mark. */
+export function Logo({ size = 28, stacked = false }: { size?: number; stacked?: boolean }) {
+  if (stacked) {
+    return (
+      <div className="logo stacked" style={{ gap: size * 0.15 }}>
+        <Mark size={size} />
+        <span style={{ fontSize: size / 3.7, lineHeight: `${size / 3}px` }}>Intergalactic<br />Backup<br />System</span>
+      </div>
+    )
+  }
   return (
     <div className="logo" style={{ gap: size * 0.32 }}>
       <Mark size={size} />

@@ -1,4 +1,4 @@
-import { FormEvent, Fragment, useEffect, useState } from 'react'
+import { FormEvent, Fragment, useEffect, useRef, useState } from 'react'
 import { api, ScrubInfo, State, UpdatesInfo } from './api'
 import UpdateBanner from './UpdateBanner'
 import { ErrorBox, useLive, useLoader } from './ui'
@@ -72,6 +72,7 @@ function Login({ siteName, onDone }: { siteName?: string; onDone: () => void }) 
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState(false)
+  const input = useRef<HTMLInputElement>(null)
   const submit = async (e: FormEvent) => {
     e.preventDefault()
     setBusy(true)
@@ -80,6 +81,9 @@ function Login({ siteName, onDone }: { siteName?: string; onDone: () => void }) 
       onDone()
     } catch (err) {
       setError((err as Error).message)
+      // Select the wrong password, so typing replaces it.
+      input.current?.focus()
+      input.current?.select()
     } finally {
       setBusy(false)
     }
@@ -92,7 +96,7 @@ function Login({ siteName, onDone }: { siteName?: string; onDone: () => void }) 
         <p className="muted">Sign in to manage this site.</p>
         <label>
           Admin password
-          <input type="password" autoFocus value={password} onChange={(e) => setPassword(e.target.value)} />
+          <input ref={input} type="password" autoFocus value={password} onChange={(e) => setPassword(e.target.value)} />
         </label>
         <ErrorBox error={error} />
         <button className="btn primary" disabled={busy || !password}>Sign in</button>
@@ -123,10 +127,10 @@ function Shell({ state, onLogout }: { state: State; onLogout: () => void }) {
     <div className="shell">
       <aside className={`sidebar ${menuOpen ? 'open' : ''}`}>
         <div className="sidebar-top">
-          <Logo />
+          <Logo size={48} stacked />
           <button className="btn small menu-toggle" onClick={() => setMenuOpen(!menuOpen)}>Menu</button>
         </div>
-        <div className="site-name" title={state.site_id}>{state.site_name}</div>
+        <div className="site-name" title={state.site_id}><small>Site</small>{state.site_name}</div>
         <nav>
           {(Object.keys(pages) as PageId[]).map((id) => (
             <Fragment key={id}>
