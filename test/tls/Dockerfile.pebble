@@ -1,0 +1,10 @@
+# Pebble (Let's Encrypt's test CA) and its mock DNS server, built from source.
+FROM golang:1.26-alpine AS build
+ARG PEBBLE=v2.10.1
+RUN go install github.com/letsencrypt/pebble/v2/cmd/pebble@$PEBBLE \
+      github.com/letsencrypt/pebble/v2/cmd/pebble-challtestsrv@$PEBBLE && \
+    cp -r /go/pkg/mod/github.com/letsencrypt/pebble/v2@$PEBBLE/test /pebble-test
+
+FROM alpine:3.20
+COPY --from=build /go/bin/pebble /go/bin/pebble-challtestsrv /usr/local/bin/
+COPY --from=build /pebble-test /test

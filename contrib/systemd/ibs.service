@@ -1,0 +1,22 @@
+# IBS site manager. Install: see the README, "Without Docker".
+[Unit]
+Description=IBS site manager
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ibs
+Group=ibs
+Environment=IBS_DATA=/var/lib/ibs
+EnvironmentFile=-/etc/ibs/ibs.env
+ExecStart=/usr/local/bin/ibs manager
+Restart=on-failure
+StateDirectory=ibs
+StateDirectoryMode=0700
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

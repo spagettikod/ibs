@@ -1,0 +1,89 @@
+# NAT traversal test: two sites behind separate NAT routers, a relay on the
+# "internet" in between. The sites cannot reach each other except through
+# both routers, so a direct connection proves hole punching works.
+#
+#   home-a (10.1.0.0/24)  site-a ── router-a ─┐
+#                                             ├─ internet (172.31.0.0/24) ── relay 172.31.0.10
+#   home-b (10.2.0.0/24)  site-b ── router-b ─┘
+#
+# Run: ./run.sh             typical home routers: expects a direct connection
+#      ./run.sh symmetric   routers pick a new port per destination (symmetric
+#                           NAT): expects the sites to keep working via the relay
+x-router: &router
+  image: alpine:3.20
+  cap_add: [NET_ADMIN]
+  sysctls: { net.ipv4.ip_forward: "1" }
+  # Masquerade everything leaving towards the internet, never forward to other
+  # private networks (a typical home router), and add internet-like latency.
+  command: sh -c "apk add -q --no-cache iptables iproute2-tc >/dev/null &&
+    OUT=$$(ip -o -4 addr | awk '/172\\.31\\./{print $$2}') &&
+    iptables -t nat -A POSTROUTING -o $$OUT -j MASQUERADE ${NAT_FLAGS:-} &&
+    iptables -A FORWARD -d 10.0.0.0/8 ! -i $$OUT -j DROP &&
+    iptables -A FORWARD -i $$OUT -m state --state ESTABLISHED,RELATED -j ACCEPT &&
+    iptables -A FORWARD -i $$OUT -j DROP &&
+    tc qdisc add dev $$OUT root netem delay ${LATENCY:-15ms} &&
+    touch /tmp/ready && echo router ready && exec sleep infinity"
+  # Sites must only start once NAT is in place; flows that start earlier keep
+  # bypassing the NAT rules.
+  healthcheck: { test: ["CMD", "test", "-f", "/tmp/ready"], interval: 1s, retries: 60 }
+
+x-site: &site
+  image: ibs
+  cap_add: [NET_ADMIN]
+  # Route everything via the home router instead of Docker's gateway.
+  entrypoint: ["sh", "-c", "ip route replace default via $$GW && exec docker-entrypoint.sh"]
+  environment: &siteenv
+    IBS_ADMIN_PASSWORD: changeme123
+    IBS_RELAY_ADDRESS: 172.31.0.10:7444
+    IBS_RELAY_TOKEN_FILE: /relay/token
+    IBS_CHECK_INTERVAL: 2s
+
+services:
+  relay:
+    image: ibs-relay
+    environment:
+      IBS_RELAY_ADVERTISE: 172.31.0.10:7444
+      IBS_RELAY_TOKEN_OUT: /share/token
+    volumes: [relay-share:/share]
+    networks: { internet: { ipv4_address: 172.31.0.10 } }
+
+  router-a:
+    <<: *router
+    networks:
+      internet: { ipv4_address: 172.31.0.2 }
+      home-a: { ipv4_address: 10.1.0.2 }
+  router-b:
+    <<: *router
+    networks:
+      internet: { ipv4_address: 172.31.0.3 }
+      home-b: { ipv4_address: 10.2.0.2 }
+
+  site-a:
+    <<: *site
+    depends_on: { router-a: { condition: service_healthy }, relay: { condition: service_started } }
+    environment: { <<: *siteenv, IBS_SITE_NAME: site-a, GW: 10.1.0.2 }
+    volumes: [relay-share:/relay:ro]
+    networks: { home-a: { ipv4_address: 10.1.0.10 } }
+  site-b:
+    <<: *site
+    depends_on: { router-b: { condition: service_healthy }, relay: { condition: service_started } }
+    environment: { <<: *siteenv, IBS_SITE_NAME: site-b, GW: 10.2.0.2 }
+    volumes: [relay-share:/relay:ro]
+    networks: { home-b: { ipv4_address: 10.2.0.10 } }
+
+  # Talks to the sites' admin APIs for the test script (attached to both
+  # homes but never routes between them).
+  ctl:
+    image: curlimages/curl:8.10.1
+    entrypoint: ["sleep", "infinity"]
+    networks:
+      home-a: { ipv4_address: 10.1.0.99 }
+      home-b: { ipv4_address: 10.2.0.99 }
+
+volumes:
+  relay-share:
+
+networks:
+  internet: { ipam: { config: [{ subnet: 172.31.0.0/24 }] } }
+  home-a: { ipam: { config: [{ subnet: 10.1.0.0/24 }] } }
+  home-b: { ipam: { config: [{ subnet: 10.2.0.0/24 }] } }

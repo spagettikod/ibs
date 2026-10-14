@@ -1,0 +1,22 @@
+# IBS storage node. Set IBS_MANAGER and IBS_JOIN_TOKEN in /etc/ibs/ibs-node.env.
+[Unit]
+Description=IBS storage node
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ibs
+Group=ibs
+Environment=IBS_DATA=/var/lib/ibs-node
+EnvironmentFile=/etc/ibs/ibs-node.env
+ExecStart=/usr/local/bin/ibs node
+Restart=on-failure
+StateDirectory=ibs-node
+StateDirectoryMode=0700
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

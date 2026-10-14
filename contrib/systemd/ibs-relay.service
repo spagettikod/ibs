@@ -1,0 +1,22 @@
+# IBS relay. Print its token: sudo -u ibs IBS_DATA=/var/lib/ibs-relay ibs-relay token
+[Unit]
+Description=IBS relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ibs
+Group=ibs
+Environment=IBS_DATA=/var/lib/ibs-relay
+EnvironmentFile=-/etc/ibs/ibs-relay.env
+ExecStart=/usr/local/bin/ibs-relay
+Restart=on-failure
+StateDirectory=ibs-relay
+StateDirectoryMode=0700
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

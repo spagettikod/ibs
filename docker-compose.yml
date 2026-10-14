@@ -1,0 +1,95 @@
+# Demo IBS: three sites and a relay, with no site-to-site ports exposed.
+#
+#   site-a: manager + one storage node   UI http://localhost:8081  S3 http://localhost:9001
+#   site-b: manager                      UI http://localhost:8082  S3 http://localhost:9002
+#   site-c: manager                      UI http://localhost:8083  S3 http://localhost:9003
+#   relay:  ibs-relay, the only reachable service between sites
+#
+# site-a and site-b share a "home" network, so they find a direct connection.
+# site-c sits on its own network and can only be reached through the relay.
+# Every site registers with the relay automatically (address relay:7444, token
+# in .data/relay/share).
+#
+# All sites are created with admin password "changeme123". Recovery phrases are
+# printed once, on first start: docker compose logs | grep recovery_phrase
+# Pair the sites on the "IBS network" page: create an invite on one, join on another.
+#
+# Data is kept in ./.data/ so it survives restarts. Delete ./.data to start over.
+x-site: &site
+  image: ibs
+  restart: unless-stopped
+  depends_on: [relay]
+
+services:
+  relay:
+    build: { context: ., target: relay }
+    image: ibs-relay
+    restart: unless-stopped
+    environment:
+      IBS_RELAY_ADVERTISE: relay:7444
+      IBS_RELAY_TOKEN_OUT: /share/token
+    volumes:
+      - ./.data/relay/data:/data
+      - ./.data/relay/share:/share
+    networks: [home-ab, home-c]
+
+  site-a:
+    <<: *site
+    build: { context: ., target: ibs }
+    environment:
+      IBS_SITE_NAME: site-a
+      IBS_ADMIN_PASSWORD: changeme123
+      IBS_RELAY_ADDRESS: relay:7444
+      IBS_RELAY_TOKEN_FILE: /relay/token
+      IBS_NODE_JOIN_ADDRESS: site-a:7443
+      IBS_JOIN_TOKEN_OUT: /join/token
+    ports: ["8081:8080", "9001:9000"]
+    volumes:
+      - ./.data/site-a/manager:/data
+      - ./.data/site-a/join:/join
+      - ./.data/relay/share:/relay:ro
+    networks: [home-ab]
+
+  site-a-node1:
+    <<: *site
+    command: ["node"]
+    depends_on: [site-a]
+    environment:
+      IBS_MANAGER: site-a:7443
+      IBS_JOIN_TOKEN_FILE: /join/token
+      IBS_NODE_NAME: node1
+      IBS_STORAGE_LIMIT: 10G # share at most 10 GiB of this node's disk with IBS (default: whole disk)
+    volumes:
+      - ./.data/site-a/node1:/data
+      - ./.data/site-a/join:/join:ro
+    networks: [home-ab]
+
+  site-b:
+    <<: *site
+    environment:
+      IBS_SITE_NAME: site-b
+      IBS_ADMIN_PASSWORD: changeme123
+      IBS_RELAY_ADDRESS: relay:7444
+      IBS_RELAY_TOKEN_FILE: /relay/token
+    ports: ["8082:8080", "9002:9000"]
+    volumes:
+      - ./.data/site-b/manager:/data
+      - ./.data/relay/share:/relay:ro
+    networks: [home-ab]
+
+  site-c:
+    <<: *site
+    environment:
+      IBS_SITE_NAME: site-c
+      IBS_ADMIN_PASSWORD: changeme123
+      IBS_RELAY_ADDRESS: relay:7444
+      IBS_RELAY_TOKEN_FILE: /relay/token
+    ports: ["8083:8080", "9003:9000"]
+    volumes:
+      - ./.data/site-c/manager:/data
+      - ./.data/relay/share:/relay:ro
+    networks: [home-c]
+
+networks:
+  home-ab:
+  home-c:

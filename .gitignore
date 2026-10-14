@@ -1,0 +1,12 @@
+/ibs
+/data/
+web/node_modules/
+web/dist/*
+!web/dist/.gitkeep
+
+# Docker Compose demo data
+/.data/
+
+# Release builds
+/dist/
+test/logs/
