@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, Dashboard, PathInfo, RelayInfo, Settings } from '../api'
 import { NetworkView, useNetworkView, ViewSwitch } from '../GeoMap'
-import { ago, Card, Copy, Empty, ErrorBox, fmtBytes, fmtMs, fmtSpeed, Modal, shortId, Status, uptime, useLoader, useSubmit, useTick, Version } from '../ui'
+import { ago, Card, Copy, Empty, ErrorBox, fmtBytes, fmtMs, fmtSpeed, Meter, Modal, shortId, Status, uptime, useLoader, useSubmit, useTick, Version } from '../ui'
 
 export function PathBadge({ path, online }: { path: PathInfo; online: boolean }) {
   if (!online || !path.kind) return <span className="path none">Not connected</span>
@@ -14,6 +14,18 @@ export function PathBadge({ path, online }: { path: PathInfo; online: boolean })
     )
   }
   return <span className="path">Direct{path.kind === 'quic' ? '' : ' (TCP)'}</span>
+}
+
+/** Shared is a table cell with the storage a site shares with the IBS. */
+function Shared({ capacity, free }: { capacity: number; free: number }) {
+  if (!capacity) return <td className="muted">—</td>
+  return (
+    <td className="shared-cell">
+      {fmtBytes(capacity)}
+      <Meter used={capacity - free} total={capacity} />
+      <div className="muted small">{fmtBytes(free)} free</div>
+    </td>
+  )
 }
 
 type Dialog = { kind: 'address' } | { kind: 'leave' } | { kind: 'invite' } | { kind: 'join' } | { kind: 'relay' } | { kind: 'move'; relay: RelayInfo }
@@ -37,13 +49,20 @@ export default function NetworkPage() {
   const peerIds = new Set(peers.map((p) => p.site_id))
   const indirect = (data?.network ?? []).filter((n) => !peerIds.has(n.site_id))
   const reachable = !!data && (!!data.site.peer_advertise || relays.length > 0)
+  // What all sites share together: this one and every one it knows of.
+  const all = data ? [data.site, ...data.network] : []
+  const shared = all.reduce((n, s) => n + (s.capacity || 0), 0)
+  const sharedFree = all.reduce((n, s) => n + (s.free || 0), 0)
 
   return (
     <div className="page">
       <header className="page-head">
         <div>
           <h1>The Known Universe</h1>
-          <p className="muted small">Sites connect directly when they can, otherwise through a relay.</p>
+          <p className="muted small">
+            Sites connect directly when they can, otherwise through a relay.
+            {all.length > 1 && shared > 0 && <> Together the {all.length} sites share {fmtBytes(shared)}, {fmtBytes(sharedFree)} of it free.</>}
+          </p>
         </div>
         <div className="page-actions">
           <button className="btn primary" onClick={() => setDialog({ kind: 'invite' })}>Invite a site</button>
@@ -69,7 +88,7 @@ export default function NetworkPage() {
         ) : (
           <table>
             <thead>
-              <tr><th>Site</th><th>Version</th><th>Connection</th><th>Ping</th><th>Speed</th><th>Our data there</th><th>Their data here</th></tr>
+              <tr><th>Site</th><th>Version</th><th>Connection</th><th>Ping</th><th>Speed</th><th>Shared</th><th>Our data there</th><th>Their data here</th></tr>
             </thead>
             <tbody>
               {peers.map((p) => (
@@ -85,6 +104,7 @@ export default function NetworkPage() {
                   </td>
                   <td className="num">{p.online ? fmtMs(p.path.rtt_ms) : '—'}</td>
                   <td className="num">{p.online ? fmtSpeed(p.path.bps) : '—'}</td>
+                  <Shared capacity={p.capacity} free={p.free} />
                   <td>{fmtBytes(p.bytes_out)}<div className="muted small">{p.replicas_out} blocks</div></td>
                   <td>{fmtBytes(p.held_bytes)}<div className="muted small">{p.held_blocks} blocks</div></td>
                 </tr>
@@ -141,7 +161,7 @@ export default function NetworkPage() {
         <Card title="Other sites in the IBS">
           <p className="muted small">Known through the sites this one is connected to. This site connects to them on its own; until then they're listed here.</p>
           <table>
-            <thead><tr><th>Site</th><th>Status</th><th>Version</th><th>Uptime</th><th>Remaining storage</th><th>Last seen</th></tr></thead>
+            <thead><tr><th>Site</th><th>Status</th><th>Version</th><th>Uptime</th><th>Shared</th><th>Last seen</th></tr></thead>
             <tbody>
               {indirect.map((n) => (
                 <tr key={n.site_id}>
@@ -149,7 +169,7 @@ export default function NetworkPage() {
                   <td><Status online={n.online} /></td>
                   <Version v={n.version} />
                   <td>{uptime(n.up_since, n.online)}</td>
-                  <td>{fmtBytes(n.free)}</td>
+                  <Shared capacity={n.capacity} free={n.free} />
                   <td>{ago(n.last_seen)}</td>
                 </tr>
               ))}

@@ -337,3 +337,5 @@ label.check input { width: auto; margin-top: 3px; }
 .notice.warn { border-color: color-mix(in srgb, var(--warn) 50%, transparent); background: var(--warn-bg); color: var(--warn); }
 .seen { margin-top: 12px; }
 .key-cell { word-break: break-all; max-width: 360px; }
+.shared-cell { min-width: 110px; }
+.shared-cell .meter { margin: 4px 0 2px; }

@@ -5,6 +5,8 @@ the launcher and the relay are released separately.
 
 ## Unreleased
 
+- **The Known Universe shows the storage each site shares**, how much of it is free, and
+  the total for the whole IBS.
 - **Invites are about half as long** (they start with `ibs2.`). Joining with one needs
   this version or newer; older `ibs1.` invites still work until 1.5.0.
 - Releases are signed with OpenSSL; `ibs-sign` is replaced by `ibs-release`, which never
