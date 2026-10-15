@@ -99,8 +99,14 @@ func (s *Site) runRelay(t relay.Token, added int64) *relay.Client {
 	cert, _ := s.ID.Certificate()
 	rc := &relay.Client{
 		Token: t, Cert: cert, Name: s.Name(), Local: s.localEndpoints,
-		OnIncoming: func(conn net.Conn, from string) { s.relayed.push(&relayedConn{Conn: conn, from: from}) },
-		OnPunch:    s.onPunch,
+		OnIncoming: func(conn net.Conn, from string) {
+			if n, ok := strings.CutPrefix(from, "code:"); ok {
+				go s.answerCode(conn, n) // a site joining with an invite code
+				return
+			}
+			s.relayed.push(&relayedConn{Conn: conn, from: from})
+		},
+		OnPunch: s.onPunch,
 		OnSecret: func(secret string) {
 			if _, err := s.DB.Exec(`UPDATE relays SET secret = ? WHERE id = ?`, secret, id); err != nil {
 				s.log.Warn("store new relay token", "relay", t.Address, "err", err)
@@ -109,6 +115,7 @@ func (s *Site) runRelay(t relay.Token, added int64) *relay.Client {
 			s.log.Info("relay token changed", "relay", t.Address)
 		},
 	}
+	rc.OnConnect = func() { s.reclaimCodes(rc) }
 	s.netMu.Lock()
 	if s.quicTr != nil {
 		rc.UDP = s.quicTr

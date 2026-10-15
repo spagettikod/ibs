@@ -76,8 +76,9 @@ type Server struct {
 	loaded   time.Time // modification time of the state file when last read or written
 	controls map[string]*control
 	pending  map[string]pendingConn
-	tokens   map[string]string // udp probe token -> site id
-	observed map[string]string // site id -> public UDP address seen by the relay
+	tokens   map[string]string    // udp probe token -> site id
+	observed map[string]string    // site id -> public UDP address seen by the relay
+	codes    map[string]codeClaim // invite code number -> the site that made it
 	splices  int
 
 	// OnTokenChange is called when "ibs-relay new-token" replaced the token
@@ -94,7 +95,7 @@ func New(dir, advertise, secret string) (*Server, error) {
 	s := &Server{
 		dir: dir, advertise: advertise, log: slog.Default(),
 		controls: map[string]*control{}, pending: map[string]pendingConn{},
-		tokens: map[string]string{}, observed: map[string]string{},
+		tokens: map[string]string{}, observed: map[string]string{}, codes: map[string]codeClaim{},
 	}
 	b, err := os.ReadFile(s.statePath())
 	switch {
@@ -399,6 +400,16 @@ func (s *Server) handle(c *tls.Conn) {
 			return
 		}
 		s.accept(c, r, siteID, hello.ID)
+	case "code":
+		// A site joining with an invite code, which needn't be registered here:
+		// it reaches the site that made the code. One attempt per code.
+		target, ok := s.takeCode(hello.Name)
+		if !ok {
+			writeMsg(c, Msg{Op: "error", Error: "no such invite code here; it may have been used or expired"})
+			c.Close()
+			return
+		}
+		s.connect(c, r, "code:"+hello.Name, target)
 	default:
 		c.Close()
 	}
@@ -443,6 +454,14 @@ func (s *Server) runControl(c net.Conn, r *bufio.Reader, siteID string, hello Ms
 		case "local":
 			s.mu.Lock()
 			ctl.local = m.Local
+			s.mu.Unlock()
+		case "claim":
+			ctl.send(Msg{Op: "claimed", Req: m.Req, Error: s.claimCode(siteID, m.Name, m.Time)})
+		case "release":
+			s.mu.Lock()
+			if s.codes[m.Name].siteID == siteID {
+				delete(s.codes, m.Name)
+			}
 			s.mu.Unlock()
 		case "direct":
 			// Exchange address candidates so both sides can punch through
@@ -575,3 +594,70 @@ func randomBytes(n int) []byte {
 }
 
 func randomHex(n int) string { return hex.EncodeToString(randomBytes(n)) }
+
+// Invite codes: a site claims a number for a code it gave out ("claim"); a
+// site joining with the code connects here naming that number ("code") and is
+// put through to the site that claimed it, once. The two then agree on a key
+// from the rest of the code (the words), which the relay never sees.
+
+type codeClaim struct {
+	siteID  string
+	expires time.Time
+}
+
+const (
+	maxCodes   = 10000 // claims kept at once
+	maxCodeTTL = 25 * time.Hour
+)
+
+// claimCode records that siteID handed out code number name until unix time
+// expires. It returns "" or why not.
+func (s *Server) claimCode(siteID, name string, expires int64) string {
+	if !validCodeNumber(name) {
+		return "invalid code number"
+	}
+	until := time.Unix(expires, 0)
+	if until.Before(time.Now()) || until.After(time.Now().Add(maxCodeTTL)) {
+		return "invalid expiry"
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	for n, c := range s.codes {
+		if now.After(c.expires) {
+			delete(s.codes, n)
+		}
+	}
+	if c, ok := s.codes[name]; ok && c.siteID != siteID {
+		return "taken"
+	}
+	if len(s.codes) >= maxCodes {
+		return "relay has too many open invite codes"
+	}
+	s.codes[name] = codeClaim{siteID: siteID, expires: until}
+	return ""
+}
+
+// takeCode removes a claimed number and returns the site that claimed it.
+func (s *Server) takeCode(name string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c, ok := s.codes[name]
+	delete(s.codes, name)
+	if !ok || time.Now().After(c.expires) {
+		return "", false
+	}
+	return c.siteID, true
+}
+
+func validCodeNumber(s string) bool {
+	if len(s) == 0 || len(s) > 4 {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}

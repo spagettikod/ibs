@@ -222,6 +222,18 @@ CREATE TABLE IF NOT EXISTS scrub_held (
 	damaged  INTEGER NOT NULL DEFAULT 0,
 	PRIMARY KEY (scrub_id, owner)
 );
+
+-- Short invite codes this site gave out: the number claimed on a relay, the
+-- words both sites derive their key from, and the full invite sent once the
+-- joining site proves it knows the words. used: the one attempt was made.
+CREATE TABLE IF NOT EXISTS invite_codes (
+	number   TEXT PRIMARY KEY,
+	relay_id TEXT NOT NULL,
+	words    TEXT NOT NULL,
+	invite   TEXT NOT NULL,
+	expires  INTEGER NOT NULL,
+	used     INTEGER NOT NULL DEFAULT 0
+);
 `
 
 // Level is how many database changes this version knows. A database changed

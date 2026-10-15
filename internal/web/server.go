@@ -135,7 +135,14 @@ func (s *Server) routes() {
 		if err != nil {
 			return badRequest(err.Error())
 		}
-		return writeJSON(w, map[string]string{"token": t})
+		out := map[string]string{"token": t}
+		// The short code too, when a relay of this site supports it.
+		if code, err := st.CreateInviteCode(r.Context()); err == nil {
+			out["code"] = code
+		} else {
+			out["code_error"] = err.Error()
+		}
+		return writeJSON(w, out)
 	}))
 	m.HandleFunc("POST /api/peers/join", a(func(w http.ResponseWriter, r *http.Request, st *site.Site) error {
 		var req struct {
@@ -144,7 +151,7 @@ func (s *Server) routes() {
 		if err := readJSON(r, &req); err != nil {
 			return err
 		}
-		p, err := st.JoinWithInvite(r.Context(), req.Token)
+		p, err := st.Join(r.Context(), req.Token)
 		if err != nil {
 			return badRequest(err.Error())
 		}

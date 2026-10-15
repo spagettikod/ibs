@@ -16,8 +16,12 @@ the launcher and the relay are released separately.
   downloaded and work with the site and the IBS.
 - **The Known Universe shows the storage each site shares**, how much of it is free, and
   the total for the whole IBS.
-- **Invites are about half as long** (they start with `ibs2.`). Joining with one needs
-  this version or newer; older `ibs1.` invites still work until 1.5.0.
+- **Short invite codes**, like `relay.example.com 7-comet-harbor-violet`: short enough
+  to read out. Only the site that enters the code gets in, a wrong guess makes it stop
+  working, and the relay passing it on can't read or use it. Needs a relay of version
+  1.4.0 or newer; otherwise **Invite a site** gives the long invite.
+- **Long invites are about half as long** (they start with `ibs2.`). Joining with one
+  needs this version or newer; older `ibs1.` invites still work until 1.5.0.
 - Releases are signed with OpenSSL; `ibs-sign` is replaced by `ibs-release`, which never
   sees the key (see DEVELOPMENT.md).
 

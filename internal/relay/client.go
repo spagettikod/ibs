@@ -35,6 +35,9 @@ type Client struct {
 	OnIncoming func(conn net.Conn, from string)
 	// OnPunch is called when a site asks to connect directly to this one.
 	OnPunch func(from string, endpoints []string)
+	// OnConnect is called each time the control connection is up, e.g. to
+	// claim invite code numbers again after the relay restarted.
+	OnConnect func()
 
 	// OnSecret is called when the relay hands out a new registration secret
 	// (its token was regenerated), so the site can store it.
@@ -165,6 +168,9 @@ func (c *Client) session(ctx context.Context) error {
 		conn.Close()
 	}()
 	go c.keepalive(sctx)
+	if c.OnConnect != nil {
+		go c.OnConnect()
+	}
 	for {
 		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 		m, err := readMsg(r)
@@ -189,7 +195,7 @@ func (c *Client) session(ctx context.Context) error {
 			if c.OnPunch != nil {
 				go c.OnPunch(m.From, m.Endpoints)
 			}
-		case "endpoints":
+		case "endpoints", "claimed":
 			c.mu.Lock()
 			ch := c.reqs[m.Req]
 			delete(c.reqs, m.Req)
@@ -336,6 +342,73 @@ func (c *Client) RequestDirect(ctx context.Context, target string) ([]string, er
 		c.mu.Unlock()
 		return nil, ctx.Err()
 	}
+}
+
+// ClaimCode claims invite code number name on the relay until expires, so a
+// site joining with the code is put through to this one. Relays from before
+// invite codes don't answer; that is reported as an error after a few seconds.
+func (c *Client) ClaimCode(ctx context.Context, name string, expires time.Time) error {
+	req := c.nextReq.Add(1)
+	ch := make(chan Msg, 1)
+	c.mu.Lock()
+	if c.reqs == nil {
+		c.mu.Unlock()
+		return errors.New("not connected to relay")
+	}
+	c.reqs[req] = ch
+	c.mu.Unlock()
+	defer func() {
+		c.mu.Lock()
+		delete(c.reqs, req)
+		c.mu.Unlock()
+	}()
+	if err := c.send(Msg{Op: "claim", Req: req, Name: name, Time: expires.Unix()}); err != nil {
+		return err
+	}
+	select {
+	case m := <-ch:
+		if m.Error != "" {
+			return errors.New(m.Error)
+		}
+		return nil
+	case <-time.After(5 * time.Second):
+		return errors.New("the relay doesn't support invite codes (it needs relay 1.4.0 or newer)")
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// ReleaseCode gives up a claimed invite code number.
+func (c *Client) ReleaseCode(name string) { c.send(Msg{Op: "release", Name: name}) }
+
+// DialCode connects through the relay at address to the site that claimed
+// invite code number name. The relay's key isn't known yet, so it isn't
+// checked: what the two sites exchange is protected by the code itself.
+func DialCode(ctx context.Context, address, name string, cert tls.Certificate) (net.Conn, error) {
+	d := tls.Dialer{NetDialer: &net.Dialer{Timeout: 10 * time.Second},
+		Config: &tls.Config{Certificates: []tls.Certificate{cert}, InsecureSkipVerify: true, MinVersion: tls.VersionTLS13}}
+	nc, err := d.DialContext(ctx, "tcp", address)
+	if err != nil {
+		return nil, fmt.Errorf("relay %s: %w", address, err)
+	}
+	conn := nc.(*tls.Conn)
+	if err := writeMsg(conn, Msg{Op: "code", Name: name}); err != nil {
+		conn.Close()
+		return nil, err
+	}
+	conn.SetReadDeadline(time.Now().Add(acceptTimeout + 5*time.Second))
+	r := bufio.NewReader(conn)
+	m, err := readMsg(r)
+	if err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("relay %s: %w", address, err)
+	}
+	conn.SetReadDeadline(time.Time{})
+	if m.Op != "ok" {
+		conn.Close()
+		return nil, errors.New(m.Error)
+	}
+	return readerConn{conn, r}, nil
 }
 
 // CurrentToken is the relay's token with its current registration secret.

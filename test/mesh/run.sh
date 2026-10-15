@@ -69,8 +69,14 @@ check "site-c has no sites left"                bash -c "$(declare -f api dc); [
 check "site-c deleted site-b's copies"          bash -c "$(declare -f api dc); api site-c GET /api/dashboard | grep -q '\"held_bytes\":0'"
 check "site-c doesn't come back on its own"     bash -c "sleep 12; $(declare -f api dc not_peer_of); not_peer_of site-a site-c && not_peer_of site-b site-c"
 
-echo "Rejoining"
-check "site-c joins site-b with a new invite"   bash -c "$(declare -f api dc); api site-c POST /api/peers/join '{\"token\":\"$(invite site-b)\"}' | grep -q site_id"
+echo "Rejoining with a short code"
+code() { api "$1" POST /api/peers/invite | sed -n 's/.*"code":"\([^"]*\)".*/\1/p'; }
+WRONG=$(code site-b)
+check "invites come with a short code"          bash -c "echo '$WRONG' | grep -Eq '^relay-[0-9a-z-]+(:[0-9]+)? [0-9]+-[a-z]+-[a-z]+-[a-z]+$'"
+GUESS=$(echo "$WRONG" | sed -E 's/-[a-z]+$/-zebra/'); [ "$GUESS" = "$WRONG" ] && GUESS=$(echo "$WRONG" | sed -E 's/-[a-z]+$/-yacht/')
+check "a wrong word is refused"                 bash -c "$(declare -f api dc); api site-c POST /api/peers/join '{\"token\":\"$GUESS\"}' | grep -q \"don't match\""
+check "and the code is spent"                   bash -c "$(declare -f api dc); ! api site-c POST /api/peers/join '{\"token\":\"$WRONG\"}' | grep -q site_id"
+check "site-c joins site-b with a new code"     bash -c "$(declare -f api dc); api site-c POST /api/peers/join '{\"token\":\"$(code site-b)\"}' | grep -q site_id"
 check "site-c connects to site-a again"         wait_for 60 peer_of site-c site-a
 check "site-a connects to site-c again"         wait_for 60 peer_of site-a site-c
 

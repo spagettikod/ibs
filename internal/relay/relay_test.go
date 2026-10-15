@@ -170,3 +170,31 @@ func TestTokenForms(t *testing.T) {
 		t.Fatalf("token with address: %+v %v", full, err)
 	}
 }
+
+func TestInviteCodeClaims(t *testing.T) {
+	s := &Server{codes: map[string]codeClaim{}}
+	later := time.Now().Add(time.Hour).Unix()
+	if e := s.claimCode("site-a", "7", later); e != "" {
+		t.Fatal(e)
+	}
+	if e := s.claimCode("site-b", "7", later); e != "taken" {
+		t.Fatalf("another site claimed a taken number: %q", e)
+	}
+	if e := s.claimCode("site-a", "7", later); e != "" {
+		t.Fatalf("claiming again after a restart: %q", e)
+	}
+	for _, bad := range []string{"", "x", "12345"} {
+		if s.claimCode("site-a", bad, later) == "" {
+			t.Errorf("claimed %q", bad)
+		}
+	}
+	if s.claimCode("site-a", "8", time.Now().Add(48*time.Hour).Unix()) == "" {
+		t.Error("accepted a claim for two days")
+	}
+	if site, ok := s.takeCode("7"); !ok || site != "site-a" {
+		t.Fatalf("take: %q %v", site, ok)
+	}
+	if _, ok := s.takeCode("7"); ok {
+		t.Fatal("a code was taken twice")
+	}
+}

@@ -201,10 +201,14 @@ export default function NetworkPage() {
 
 /** Runs an action for a dialog form, keeping its busy and error state. */
 
+type InviteResult = { token: string; code?: string; code_error?: string }
+
 function InviteDialog({ reachable, onClose, onAddRelay }: { reachable: boolean; onClose: () => void; onAddRelay: () => void }) {
-  const [invite, setInvite] = useState<string>()
-  const { busy, error, submit } = useSubmit(async () => setInvite((await api<{ token: string }>('POST', '/api/peers/invite')).token))
+  const [invite, setInvite] = useState<InviteResult>()
+  const [showLong, setShowLong] = useState(false)
+  const { busy, error, submit } = useSubmit(async () => setInvite(await api<InviteResult>('POST', '/api/peers/invite')))
   useEffect(() => { if (reachable) submit() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  const long = invite && (showLong || !invite.code)
   return (
     <Modal title="Invite a site" onClose={onClose}>
       {!reachable ? (
@@ -215,14 +219,28 @@ function InviteDialog({ reachable, onClose, onAddRelay }: { reachable: boolean; 
       ) : (
         <>
           <p className="muted small">
-            Give this invite to the other site; they paste it under <b>Join a site</b>. It brings that site into the IBS:
+            Give this to the other site's admin; they enter it under <b>Join a site</b>. It brings that site into the IBS:
             it connects to every site here, not just this one. It works once and is valid for 24 hours.
           </p>
-          {invite && <textarea readOnly rows={5} className="mono" value={invite} onFocus={(e) => e.target.select()} />}
+          {invite?.code && !showLong && (
+            <>
+              <div className="invite-code mono">{invite.code}</div>
+              <p className="muted small">
+                Short enough to read out. Only the site that enters it gets in; a wrong guess makes it stop working.
+              </p>
+            </>
+          )}
+          {long && <textarea readOnly rows={5} className="mono" value={invite!.token} onFocus={(e) => e.target.select()} />}
+          {invite && !invite.code && invite.code_error && (
+            <p className="muted small">The long invite: short codes aren't available ({invite.code_error}).</p>
+          )}
           {busy && <p className="muted small">Creating invite…</p>}
           <ErrorBox error={error} />
           <div className="row">
-            {invite && <Copy text={invite} label="Copy invite" />}
+            {invite && <Copy text={long ? invite.token : invite.code!} label={long ? 'Copy invite' : 'Copy code'} />}
+            {invite?.code && (
+              <button className="btn small ghost" onClick={() => setShowLong(!showLong)}>{showLong ? 'Show the short code' : 'Show the long invite'}</button>
+            )}
             <button className="btn" onClick={onClose}>Done</button>
           </div>
         </>
@@ -239,8 +257,9 @@ function JoinDialog({ onClose, onDone }: { onClose: () => void; onDone: () => vo
       <form className="stack" onSubmit={submit}>
         <label>
           Invite
-          <textarea autoFocus rows={5} className="mono" placeholder="ibs1.…" value={token} onChange={(e) => setToken(e.target.value)} />
-          <small className="muted">Create it on the other site under <b>Invite a site</b>.</small>
+          <textarea autoFocus rows={3} className="mono" placeholder="relay.example.com 7-comet-harbor-violet" value={token}
+            onChange={(e) => setToken(e.target.value)} />
+          <small className="muted">The code or long invite (ibs2.…) from the other site's <b>Invite a site</b>.</small>
         </label>
         <ErrorBox error={error} />
         <div className="row">
