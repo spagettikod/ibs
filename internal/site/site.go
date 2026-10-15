@@ -73,6 +73,9 @@ type Site struct {
 	scrub   scrubState
 	roomMu  sync.Mutex   // one makeRoom at a time
 	noRoom  atomic.Int64 // blocks no site had room for at the last replication run
+	// replCursor: the last block of the previous replication batch (replicateOnce only).
+	replCursor string
+	replNoRoom int64 // blocks without room so far in this pass (replicateOnce only)
 }
 
 // IsSetUp reports whether the data directory holds an initialized site.

@@ -514,3 +514,46 @@ func TestReleaseCopies(t *testing.T) {
 		t.Fatalf("released %d for 1 byte", len(got))
 	}
 }
+
+// Blocks every online site already holds don't fill the replication batches,
+// and each batch goes on after the previous one, so all blocks get their turn.
+func TestReplicationBatches(t *testing.T) {
+	s := newTestSite(t)
+	ctx := context.Background()
+	s.CreateBucket("many")
+	for i := range replicateBatch + 44 {
+		data := make([]byte, 1000)
+		rand.Read(data)
+		if _, err := s.PutObject(ctx, "many", fmt.Sprint(i), bytes.NewReader(data), "", nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := time.Now().Unix()
+	s.DB.Exec(`INSERT INTO peers(site_id, name, pubkey, address, added, last_seen, online) VALUES('only-peer', 'only-peer', x'', '', ?, ?, 1)`, now, now)
+
+	batch := func() []replNeed {
+		needs, err := s.replicationNeeds(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return needs
+	}
+	if n := len(batch()); n != replicateBatch {
+		t.Fatalf("first batch %d", n)
+	}
+	if n := len(batch()); n != 44 {
+		t.Fatalf("second batch %d, want the 44 after the first", n)
+	}
+	if n := len(batch()); n != replicateBatch {
+		t.Fatalf("third batch %d: should start over", n)
+	}
+
+	// The one other site holds the first 256 blocks: they need a second site,
+	// which doesn't exist, so the other 44 come up at once.
+	s.replCursor = ""
+	s.DB.Exec(`INSERT INTO replicas(block_id, site_id, state, verified)
+		SELECT id, 'only-peer', 'ok', ? FROM blocks ORDER BY id LIMIT ?`, now, replicateBatch)
+	if n := len(batch()); n != 44 {
+		t.Fatalf("batch %d, want only the 44 blocks the other site doesn't hold", n)
+	}
+}

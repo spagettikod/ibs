@@ -5,6 +5,8 @@ the launcher and the relay are released separately.
 
 ## Unreleased
 
+- **Copying to other sites no longer stalls** after about 250 blocks when there are
+  fewer sites than copies, or when the next site in line is full.
 - **Relays spread:** a relay added or removed on one site is added or removed on the
   others. A site keeps a relay that is its only way to be reached.
 - `IBS_RELAY_ADDRESS` no longer undoes a relay's newer address when a site restarts.

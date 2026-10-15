@@ -26,37 +26,63 @@ type peerCandidate struct {
 	free   int64
 }
 
-// replicateOnce brings blocks up to their bucket's replication count by
-// copying them to online peers with the most free space. Replicas on peers
-// that have been unreachable longer than the grace period do not count, so
-// their blocks are re-replicated elsewhere.
-func (s *Site) replicateOnce(ctx context.Context) {
+type replNeed struct {
+	id      string
+	missing int
+}
+
+// replicationNeeds returns the next batch of blocks that need more copies and
+// that some online site could take.
+func (s *Site) replicationNeeds(ctx context.Context) ([]replNeed, error) {
 	countedSince := time.Now().Add(-s.cfg.PeerGrace).Unix()
 	rows, err := s.DB.QueryContext(ctx, `SELECT id, replication, n FROM (
 			SELECT b.id, bk.replication,
 				(SELECT COUNT(*) FROM replicas r JOIN peers p ON p.site_id = r.site_id
 					WHERE r.block_id = b.id AND r.state = 'ok' AND p.last_seen >= ?) AS n
 			FROM blocks b JOIN buckets bk ON bk.name = b.bucket
-			WHERE b.refs > 0 AND bk.replication > 0)
-		WHERE n < replication LIMIT ?`, countedSince, replicateBatch)
+			WHERE b.refs > 0 AND bk.replication > 0
+				-- Only blocks some online site could take: the others (e.g. with fewer
+				-- sites than copies) would otherwise fill every batch and stall the rest.
+				AND EXISTS (SELECT 1 FROM peers p WHERE p.online = 1
+					AND NOT EXISTS (SELECT 1 FROM replicas r WHERE r.block_id = b.id AND r.site_id = p.site_id))
+				AND b.id > ?
+			ORDER BY b.id)
+		WHERE n < replication LIMIT ?`, countedSince, s.replCursor, replicateBatch)
 	if err != nil {
-		s.log.Warn("replication query", "err", err)
-		return
+		return nil, err
 	}
-	type need struct {
-		id      string
-		missing int
-	}
-	var needs []need
+	var needs []replNeed
 	for rows.Next() {
 		var id string
 		var repl, n int
 		rows.Scan(&id, &repl, &n)
-		needs = append(needs, need{id, repl - n})
+		needs = append(needs, replNeed{id, repl - n})
 	}
 	rows.Close()
+	// Each run goes on after the last block of the one before, so blocks that
+	// can't be copied now (all candidate sites full) don't hold up the rest.
+	if len(needs) == replicateBatch {
+		s.replCursor = needs[len(needs)-1].id
+	} else {
+		s.replCursor = ""
+	}
+	return needs, nil
+}
+
+// replicateOnce brings blocks up to their bucket's replication count by
+// copying them to online peers with the most free space. Replicas on peers
+// that have been unreachable longer than the grace period do not count, so
+// their blocks are re-replicated elsewhere. Blocks every online site already
+// holds wait for another site to come online.
+func (s *Site) replicateOnce(ctx context.Context) {
+	needs, err := s.replicationNeeds(ctx)
+	if err != nil {
+		s.log.Warn("replication query", "err", err)
+		return
+	}
 	if len(needs) == 0 {
-		s.noRoom.Store(0)
+		s.noRoom.Store(s.replNoRoom)
+		s.replNoRoom = 0
 		return
 	}
 
@@ -127,7 +153,12 @@ func (s *Site) replicateOnce(ctx context.Context) {
 			noRoom++
 		}
 	}
-	s.noRoom.Store(noRoom)
+	// Counted over a whole pass through the blocks, not one batch.
+	s.replNoRoom += noRoom
+	if s.replCursor == "" {
+		s.noRoom.Store(s.replNoRoom)
+		s.replNoRoom = 0
+	}
 	if copied > 0 {
 		s.notify(TopicReplication)
 		s.log.Info("replicated blocks", "copies", copied)
