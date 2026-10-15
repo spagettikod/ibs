@@ -215,7 +215,7 @@ func fetchInvite(conn net.Conn, number, words string) (string, error) {
 // Join joins the IBS with either a short invite code or a long invite.
 func (s *Site) Join(ctx context.Context, text string) (*PeerInfo, error) {
 	t := strings.TrimSpace(text)
-	if strings.HasPrefix(t, invitePrefix) || strings.HasPrefix(t, inviteV1Prefix) {
+	if strings.HasPrefix(t, invitePrefix) {
 		return s.JoinWithInvite(ctx, t)
 	}
 	return s.JoinWithCode(ctx, t)

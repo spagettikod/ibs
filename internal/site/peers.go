@@ -572,11 +572,10 @@ func (s *Site) Peers() ([]PeerInfo, error) {
 // one-time secret, and how to reach it. Relay tokens let the joining site
 // register with the issuer's relays. See invite.go for how it's written.
 type invite struct {
-	Address string   `json:"a,omitempty"`
-	PubKey  string   `json:"k"`
-	Secret  string   `json:"s"`
-	Name    string   `json:"n,omitempty"` // only in ibs1 invites
-	Relays  []string `json:"r,omitempty"`
+	Address string
+	PubKey  string
+	Secret  string
+	Relays  []string
 }
 
 // CreateInvite returns a token another site's admin pastes to pair with us.
@@ -614,9 +613,6 @@ func (s *Site) JoinWithInvite(ctx context.Context, token string) (*PeerInfo, err
 	if err != nil {
 		return nil, err
 	}
-	if inv.Name == "" {
-		inv.Name = "the inviting site"
-	}
 	pubRaw, err := base64.RawURLEncoding.DecodeString(inv.PubKey)
 	if err != nil || len(pubRaw) != ed25519.PublicKeySize {
 		return nil, errors.New("invite token has an invalid key")
@@ -649,7 +645,7 @@ func (s *Site) JoinWithInvite(ctx context.Context, token string) (*PeerInfo, err
 	body, _ := json.Marshal(pairRequest{Secret: inv.Secret, Name: s.Name(), Address: own.Address, Routes: own})
 	var resp pairResponse
 	if _, err := pc.call(ctx, http.MethodPost, "/peer/v1/pair", body, &resp); err != nil {
-		return nil, fmt.Errorf("contact %s: %w", inv.Name, err)
+		return nil, fmt.Errorf("contact the inviting site: %w", err)
 	}
 	if !resp.Routes.empty() {
 		routes = resp.Routes

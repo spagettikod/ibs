@@ -3,14 +3,20 @@
 Each release says what to update and which launcher and relay it works with: IBS,
 the launcher and the relay are released separately.
 
-## Unreleased
+## 1.5.0
+
+**What to update:** sites, under **Settings → Updates**; nodes follow. Update every
+site: copies of a site still on 1.4.0 can't be pushed away.
+
+**Works with:** launcher 1.0.0, relay 1.2.0 or newer (1.4.0 for short invite codes).
 
 - **No share setting:** other sites' copies may use all free space. When your own files
   need room, your site pushes other sites' copies away: their owners place them
   elsewhere first, or keep two copies of the file. Copies of offline sites stay. The
   owner's dashboard says when the IBS is running out of space; the missing copies come
-  back when there is room. Sites on 1.4.0 keep their copies until they update.
+  back when there is room.
 - **The network diagram** draws direct connections around relays, not through them.
+- Old `ibs1.` invites no longer work; make a new invite.
 
 ## 1.4.0
 

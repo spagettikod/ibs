@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"io"
 	"strings"
@@ -12,22 +11,13 @@ import (
 	"ibs/internal/relay"
 )
 
-// Invites come in two forms:
-//
-//	ibs2.<base64url of compact bytes>  written since 1.4.0
-//	ibs1.<base64url of JSON>           written before; still read
-//
-// TODO(1.5.0): stop reading ibs1 invites (decodeInviteV1 and inviteV1Prefix).
-//
-// The compact form holds the issuer's key, the one-time secret, its direct
+// Invites are "ibs2." and the base64url of compact bytes (since 1.4.0; the
+// older JSON "ibs1." invites were read until 1.5.0). They hold the issuer's key, the one-time secret, its direct
 // address and its relays (address, key and registration secret), each string
 // prefixed with its length:
 //
 //	key[32] len secret len address count { len address key[32] len secret }
-const (
-	invitePrefix   = "ibs2."
-	inviteV1Prefix = "ibs1."
-)
+const invitePrefix = "ibs2."
 
 var errBadInvite = errors.New("invite token is malformed")
 
@@ -72,13 +62,10 @@ func encodeInvite(inv invite) (string, error) {
 	return invitePrefix + base64.RawURLEncoding.EncodeToString(b.Bytes()), nil
 }
 
-// decodeInvite reads an invite in either form. Relays come back as relay
+// decodeInvite reads an invite. Relays come back as relay
 // tokens with their address, as the rest of joining expects.
 func decodeInvite(token string) (invite, error) {
 	token = strings.Join(strings.Fields(token), "") // pasted invites may wrap
-	if strings.HasPrefix(token, inviteV1Prefix) {
-		return decodeInviteV1(token)
-	}
 	if !strings.HasPrefix(token, invitePrefix) {
 		return invite{}, errBadInvite
 	}
@@ -137,15 +124,6 @@ func decodeInvite(token string) (invite, error) {
 		inv.Relays = append(inv.Relays, t.EncodeWithAddress())
 	}
 	if r.Len() != 0 || inv.Secret == "" {
-		return inv, errBadInvite
-	}
-	return inv, nil
-}
-
-func decodeInviteV1(token string) (invite, error) {
-	var inv invite
-	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(token, inviteV1Prefix))
-	if err != nil || json.Unmarshal(raw, &inv) != nil {
 		return inv, errBadInvite
 	}
 	return inv, nil
