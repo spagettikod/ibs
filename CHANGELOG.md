@@ -3,7 +3,12 @@
 Each release says what to update and which launcher and relay it works with: IBS,
 the launcher and the relay are released separately.
 
-## Unreleased
+## 1.5.1
+
+**What to update:** sites, under **Settings → Updates**; nodes follow. A site still on
+1.5.0 may not get 1.5.1 from another site: use **Check now** there.
+
+**Works with:** launcher 1.0.0, relay 1.2.0 or newer (1.4.0 for short invite codes).
 
 - **New versions from other sites** arrive over slow links and relays too (the
   download gave up after 30 seconds). The Updates page lists them in the version table
