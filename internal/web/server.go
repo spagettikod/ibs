@@ -211,6 +211,7 @@ func (s *Server) routes() {
 		var req struct {
 			GitHub *bool `json:"github"`
 			Betas  *bool `json:"betas"`
+			Auto   *bool `json:"auto_install"`
 		}
 		if err := readJSON(r, &req); err != nil {
 			return err
@@ -220,6 +221,9 @@ func (s *Server) routes() {
 		}
 		if req.Betas != nil {
 			st.SetBetas(*req.Betas)
+		}
+		if req.Auto != nil {
+			st.SetAutoInstall(*req.Auto)
 		}
 		return writeJSON(w, st.Updates())
 	}))

@@ -15,7 +15,7 @@ ROOT=$(cd ../.. && pwd)
 WORK=$(mktemp -d)
 ID=ibs-upd-$$
 NET=$ID
-cleanup() { docker rm -fv $ID-a $ID-b $ID-node $ID-bad $ID-gh $ID-c $ID-d >/dev/null 2>&1; docker network rm $NET >/dev/null 2>&1; rm -rf "$WORK"; }
+cleanup() { docker rm -fv $ID-a $ID-b $ID-node $ID-bad $ID-gh $ID-c $ID-d $ID-e >/dev/null 2>&1; docker network rm $NET >/dev/null 2>&1; rm -rf "$WORK"; }
 [ "${KEEP:-}" = 1 ] || trap cleanup EXIT
 
 LAUNCHER_VERSION=$(sed -n 's/^var Version = "\(.*\)"$/\1/p' "$ROOT/cmd/ibs-launcher/main.go")
@@ -143,5 +143,11 @@ check "a new launcher downloads the latest stable release" wait_for 60 running $
 site $ID-d site-d -e IBS_BINARY= -e IBS_BETA=true
 check "with IBS_BETA=true, the latest beta"      wait_for 60 running $ID-d 1.9.5-beta1
 check "and betas count as new versions there"   bash -c "api $ID-d GET /api/updates | grep -q '\"betas\":true'"
+
+echo "Installing automatically"
+site $ID-e site-e
+check "site-e starts on 1.8.0"                  wait_for 60 running $ID-e 1.8.0
+check "it turns on automatic installs"          bash -c "api $ID-e PUT /api/updates/settings '{\"auto_install\":true}' | grep -q '\"auto_install\":true'"
+check "and moves to 1.9.0 by itself"            wait_for 90 running $ID-e 1.9.0
 
 finish

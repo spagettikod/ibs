@@ -189,13 +189,14 @@ type UpdatesInfo struct {
 	Seen            []SeenVersion `json:"seen"`
 	Keys            []KeyInfo     `json:"keys"`
 	Betas           bool          `json:"betas"` // betas count as new versions
+	AutoInstall     bool          `json:"auto_install"`
 	Newer           string        `json:"newer"` // newest version newer than the running one, held or seen; "" when up to date
 }
 
 func (s *Site) Updates() UpdatesInfo {
 	keys := s.store().Keys()
 	names := map[string]string{}
-	info := UpdatesInfo{Running: version.Version, Launcher: UnderLauncher(), LauncherVersion: LauncherVersion(), GitHub: s.GitHubChecks(), Betas: s.Betas(), Versions: []VersionInfo{}, Seen: []SeenVersion{}}
+	info := UpdatesInfo{Running: version.Version, Launcher: UnderLauncher(), LauncherVersion: LauncherVersion(), GitHub: s.GitHubChecks(), Betas: s.Betas(), AutoInstall: s.AutoInstall(), Versions: []VersionInfo{}, Seen: []SeenVersion{}}
 	for _, k := range keys {
 		names[k.ID] = k.Name
 		info.Keys = append(info.Keys, KeyInfo{ID: k.ID, Name: k.Name, Key: k.String(), Default: k.Default,
@@ -409,6 +410,50 @@ func (s *Site) fetchReleases(ctx context.Context) {
 		if due {
 			s.checkGitHub(ctx)
 		}
+	}
+	s.autoInstall()
+}
+
+// AutoInstall reports whether new versions are installed as soon as they are
+// downloaded (off unless turned on under Settings → Updates).
+func (s *Site) AutoInstall() bool { return s.Setting("updates_auto") == "1" }
+
+// SetAutoInstall turns installing new versions automatically on or off.
+func (s *Site) SetAutoInstall(on bool) {
+	v := "0"
+	if on {
+		v = "1"
+	}
+	s.SetSetting("updates_auto", v)
+	if on {
+		go s.autoInstall()
+	}
+}
+
+// autoInstall installs the newest downloaded version, when that is turned on:
+// one newer than the running one, that counts as a new version (betas only
+// when Include betas is on), hasn't failed to start here, and works with this
+// site and the IBS. The site then restarts into it; its nodes follow.
+func (s *Site) autoInstall() {
+	if !s.AutoInstall() || !UnderLauncher() {
+		return
+	}
+	best := ""
+	for _, in := range s.store().List(s.store().Keys()) {
+		if in.Bad || !s.wanted(in.Version) || release.Compare(in.Version, version.Version) <= 0 ||
+			s.compatBlocker(in.Manifest) != "" {
+			continue
+		}
+		if best == "" || release.Compare(in.Version, best) > 0 {
+			best = in.Version
+		}
+	}
+	if best == "" {
+		return
+	}
+	s.log.Info("installing a new version automatically", "version", best)
+	if err := s.Install(best); err != nil {
+		s.log.Warn("install new version automatically", "version", best, "err", err)
 	}
 }
 

@@ -165,6 +165,16 @@ export default function UpdatesSection() {
               </small>
             </span>
           </label>
+          <label className="check">
+            <input type="checkbox" checked={data.auto_install} onChange={(e) => act(() => api('PUT', '/api/updates/settings', { auto_install: e.target.checked }))} />
+            <span>
+              Install new versions automatically
+              <small className="muted">
+                {' '}As soon as one is downloaded, if it works with this site and the IBS. The site restarts with it and its
+                storage nodes follow. A version that fails to start is undone, and not installed again.
+              </small>
+            </span>
+          </label>
           {data.github && (
             <div className="row">
               <button className="btn small" disabled={checking} onClick={checkNow}>{checking ? 'Checking…' : 'Check now'}</button>

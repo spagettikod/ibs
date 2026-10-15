@@ -25,7 +25,7 @@ wait_for() { # seconds command...
   return 1
 }
 invite() { api "$1" POST /api/peers/invite | sed -n 's/.*"token":"\([^"]*\)".*/\1/p'; }
-trap 'dc down -v --remove-orphans >/dev/null 2>&1' EXIT
+[ "${KEEP:-}" = 1 ] || trap 'dc down -v --remove-orphans >/dev/null 2>&1' EXIT
 
 dc down -v --remove-orphans >/dev/null 2>&1
 dc up -d >/dev/null 2>&1 || { echo "cannot start the sites"; exit 1; }
@@ -49,6 +49,18 @@ api site-b POST /api/buckets '{"name":"mesh"}' >/dev/null
 dc exec -T ctl sh -c "head -c 300000 /dev/urandom > /tmp/data.bin && curl -s -b /tmp/jar-site-b -H 'X-IBS: 1' -F 'file=@/tmp/data.bin;filename=data.bin' http://site-b:8080/api/buckets/mesh/upload" >/dev/null
 copies_done() { api site-b GET /api/dashboard | grep -q '"under_replicated":0' && api site-c GET /api/peers | tr '{' '\n' | grep '"name":"site-b"' | grep -qv '"held_blocks":0'; }
 check "copies reach site-a and site-c"          wait_for 60 copies_done
+
+echo "A relay moves"
+# relay-1 gets another address: only its new name reaches it now.
+# A restart drops the connections to it, as a real move to a new IP would.
+docker network disconnect ibs-mesh_net ibs-mesh-relay-1-1 >/dev/null &&
+  docker network connect --alias relay-1-moved ibs-mesh_net ibs-mesh-relay-1-1 >/dev/null &&
+  docker restart ibs-mesh-relay-1-1 >/dev/null
+R1=$(api site-a GET /api/relays | tr '{' '\n' | grep '"address":"relay-1:7444"' | sed -n 's/.*"id":"\([0-9a-f]*\)".*/\1/p')
+api site-a PATCH /api/relays/$R1 '{"address":"relay-1-moved:7444"}' >/dev/null
+check "site-a reaches it at its new address"    wait_for 30 bash -c "$(declare -f api dc); api site-a GET /api/relays | tr '{' '\\n' | grep '\"address\":\"relay-1-moved:7444\"' | grep -q '\"connected\":true'"
+relay_moved() { api "$1" GET /api/relays | tr '{' '\n' | grep '"address":"relay-1-moved:7444"' | grep -q '"connected":true'; }
+check "site-b, also on it, follows on its own" wait_for 90 bash -c "$(declare -f api dc relay_moved); relay_moved site-b"
 
 echo "Leaving"
 check "site-c leaves the IBS"                   bash -c "$(declare -f api dc); api site-c POST /api/ibs/leave; [ \$? -eq 0 ]"

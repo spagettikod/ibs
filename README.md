@@ -190,7 +190,8 @@ them). No port has to be open. It can also be set with the `IBS_TLS_*` variables
 New versions show up in the web interface, under **Settings → Updates**. **Install**
 restarts the site with the new version, and its storage nodes follow. You can roll back
 to an older version that still works with your data and the other sites, and a version
-that fails to start is undone automatically.
+that fails to start is undone automatically. Tick **Install new versions automatically**
+to have new versions installed as soon as they're downloaded.
 
 Only stable releases are offered unless you tick **Include betas**. Versions must be
 signed: by the IBS release key, or by a key you add under **Release keys** to run builds
@@ -500,8 +501,10 @@ get the new token automatically, so their invites stay valid.
 
 <details><summary><b>The relay moved to a new address</b></summary>
 
-On each site, **The Known Universe → Relays → Edit address** next to the relay. The token
-stays the same.
+On one site, **The Known Universe → Relays → Edit address** next to the relay. The token
+stays the same. The other sites using that relay pick up the new address from it within
+a minute or two and reconnect. A site that can't reach any other site meanwhile needs
+the new address set on it too.
 
 </details>
 

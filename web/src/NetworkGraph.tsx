@@ -52,8 +52,8 @@ function edgeClass(l: Link) {
 /**
  * Map of the IBS: sites on a ring (this site on top), relays in the middle.
  * Direct connections are solid lines; relayed ones are dashed curves through
- * their relay. This site's connections are labelled with ping and speed;
- * selecting any site or connection shows its details below.
+ * their relay. There are no labels: pointing at a site or relay shows its
+ * name, and selecting a site or connection shows its details below.
  */
 export default function NetworkGraph({ selfId, selfName, selfUpSince, sites, links, relays, compact }: Props) {
   const [selected, setSelected] = useState<string>()
@@ -153,16 +153,6 @@ export default function NetworkGraph({ selfId, selfName, selfUpSince, sites, lin
               onClick={() => setSelected(e.key)}>
               <path d={g.d} className="hit" />
               <path d={g.d} className="line" />
-              {mine && e.link.online && e.link.kind && (() => {
-                const text = fmtMs(e.link.rtt_ms) // speed only in the details: it crowds the graph
-                const w = 14 + text.length * 6.4
-                return (
-                  <g transform={`translate(${g.lx},${g.ly})`} className="edge-label">
-                    <rect x={-w / 2} y={-11} width={w} height={22} rx={11} />
-                    <text textAnchor="middle" y={4}>{text}</text>
-                  </g>
-                )
-              })()}
             </g>
           )
         })}

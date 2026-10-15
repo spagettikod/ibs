@@ -8,8 +8,12 @@ the launcher and the relay are released separately.
 - **Room for your own files:** other sites' copies may use at most half of a site's
   storage (**Settings → General** changes the share), so a small site isn't filled up
   by the others. The dashboard warns when a full site holds up copies.
-- **The network diagram** shows names when you point at a site or relay, instead of a
-  label under each.
+- **The network diagram** has no labels: names show when you point at a site or relay,
+  and ping and speed are in a connection's details.
+- **Relay moves spread:** when a relay gets a new address, set it on one site; the other
+  sites using that relay pick it up and reconnect.
+- **Install new versions automatically** (Settings → Updates), as soon as they're
+  downloaded and work with the site and the IBS.
 - **The Known Universe shows the storage each site shares**, how much of it is free, and
   the total for the whole IBS.
 - **Invites are about half as long** (they start with `ibs2.`). Joining with one needs

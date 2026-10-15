@@ -64,6 +64,8 @@ type Site struct {
 	relays  map[string]*relayEntry
 	relayed *connQueue
 	webHost string // last host the web interface was opened with (NoteWebHost)
+	// relayMoveTried: when a relay was last tried at an address another site uses.
+	relayMoveTried map[string]time.Time
 
 	linksMu sync.Mutex
 	links   map[string]Link // learned from other sites
@@ -133,22 +135,23 @@ func Open(cfg config.Config) (*Site, error) {
 		return nil, err
 	}
 	s := &Site{
-		cfg:         cfg,
-		ID:          id,
-		DB:          d,
-		log:         slog.Default().With("site", id.SiteID[:8]),
-		started:     time.Now(),
-		nodes:       map[string]blockstore.Store{},
-		peerClients: map[string]*peerClient{},
-		pushedGen:   map[string]int64{},
-		nodeMetaGen: map[string]int64{},
-		reconciling: map[string]bool{},
-		reconcile:   make(chan string, 64),
-		scrub:       scrubState{wake: make(chan struct{}, 1)},
-		events:      newHub(),
-		relays:      map[string]*relayEntry{},
-		relayed:     newConnQueue(),
-		links:       map[string]Link{},
+		cfg:            cfg,
+		ID:             id,
+		DB:             d,
+		log:            slog.Default().With("site", id.SiteID[:8]),
+		started:        time.Now(),
+		nodes:          map[string]blockstore.Store{},
+		peerClients:    map[string]*peerClient{},
+		pushedGen:      map[string]int64{},
+		nodeMetaGen:    map[string]int64{},
+		reconciling:    map[string]bool{},
+		reconcile:      make(chan string, 64),
+		scrub:          scrubState{wake: make(chan struct{}, 1)},
+		relayMoveTried: map[string]time.Time{},
+		events:         newHub(),
+		relays:         map[string]*relayEntry{},
+		relayed:        newConnQueue(),
+		links:          map[string]Link{},
 	}
 	local := &blockstore.FS{Dir: filepath.Join(cfg.DataDir, "blocks")}
 	s.nodes[LocalNodeID] = local
@@ -267,6 +270,7 @@ func (s *Site) Run(ctx context.Context) {
 	every(3*iv, "backup", s.backupOnce)
 	go s.scrubLoop(ctx)
 	every(30*time.Minute, "reconcile-all", s.reconcileAll)
+	every(6*iv, "relay-moves", s.followRelayMoves)
 	go func() {
 		for {
 			select {
