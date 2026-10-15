@@ -6,8 +6,13 @@ the launcher and the relay are released separately.
 ## Unreleased
 
 - **New versions from other sites** arrive over slow links and relays too (the
-  download gave up after 30 seconds). The Updates page lists them while they are
-  fetched, and says why when fetching fails.
+  download gave up after 30 seconds). The Updates page lists them in the version table
+  while they are fetched, and says why when fetching fails.
+- **New versions on other sites are fetched right away**, not up to a minute later, and
+  the log says which site has one.
+- **Renamed relays spread:** a new address set on one site reaches the others even while
+  the old one still works. If the relay doesn't connect at the new address, a site keeps
+  the old one.
 
 ## 1.5.0
 

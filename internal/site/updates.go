@@ -70,7 +70,9 @@ type updateState struct {
 	githubChecked time.Time
 	githubError   string
 	githubLatest  string
+	fetchRun      sync.Mutex        // one fetchReleases at a time
 	fetching      map[string]bool   // versions being fetched
+	announced     map[string]bool   // new versions on other sites already logged
 	fetchErrors   map[string]string // version -> why the last fetch from a site failed
 	nodeUpdate    struct {          // the one storage node currently updating
 		id    string
@@ -372,21 +374,65 @@ func (s *Site) peerReleases() []peerRelease {
 	return out
 }
 
+// noticeReleases is called when a connected site reports other versions than
+// before. A new version this site would take is logged and fetched right away.
+func (s *Site) noticeReleases(ctx context.Context, st SiteStatus) {
+	newest := s.newestHeld()
+	trusted := map[string]bool{}
+	for _, k := range s.store().Keys() {
+		trusted[k.ID] = true
+	}
+	found := false
+	for _, r := range st.Releases {
+		if r.Platform != release.Platform || !s.wanted(r.Version) || release.Compare(r.Version, newest) <= 0 {
+			continue
+		}
+		found = found || trusted[r.KeyID]
+		s.updates.mu.Lock()
+		if s.updates.announced == nil {
+			s.updates.announced = map[string]bool{}
+		}
+		first := !s.updates.announced[r.Version]
+		s.updates.announced[r.Version] = true
+		s.updates.mu.Unlock()
+		if !first {
+			continue
+		}
+		if trusted[r.KeyID] {
+			s.log.Info("another site has a new version; fetching it", "version", r.Version, "from", st.Name)
+		} else {
+			s.log.Info("another site has a new version, signed with a key this site doesn't trust", "version", r.Version, "from", st.Name, "key", r.KeyID)
+		}
+	}
+	if found {
+		go s.fetchReleases(context.WithoutCancel(ctx))
+	}
+}
+
+// newestHeld is the newest version this site holds that it would run, or the
+// running one.
+func (s *Site) newestHeld() string {
+	newest := version.Version
+	for _, in := range s.store().List(s.store().Keys()) {
+		if !in.Bad && s.wanted(in.Version) && release.Compare(in.Version, newest) > 0 {
+			newest = in.Version
+		}
+	}
+	return newest
+}
+
 // fetchReleases gets newer versions this site doesn't hold yet: from
 // connected sites (only when signed with a key this site trusts), and from
 // GitHub when enabled. Fetching only stores them; nothing is installed.
 func (s *Site) fetchReleases(ctx context.Context) {
+	s.updates.fetchRun.Lock()
+	defer s.updates.fetchRun.Unlock()
 	keys := s.store().Keys()
 	trusted := map[string]bool{}
 	for _, k := range keys {
 		trusted[k.ID] = true
 	}
-	newest := version.Version
-	for _, in := range s.store().List(keys) {
-		if !in.Bad && s.wanted(in.Version) && release.Compare(in.Version, newest) > 0 {
-			newest = in.Version
-		}
-	}
+	newest := s.newestHeld()
 	for _, pr := range s.peerReleases() {
 		r := pr.ref
 		if !trusted[r.KeyID] || r.Platform != release.Platform || !s.wanted(r.Version) || release.Compare(r.Version, newest) <= 0 {
@@ -406,7 +452,7 @@ func (s *Site) fetchReleases(ctx context.Context) {
 			s.log.Warn("fetch release from site", "version", r.Version, "site", pr.site[:8], "err", err)
 			continue
 		}
-		s.log.Info("fetched release from another site", "version", r.Version, "site", pr.site[:8])
+		s.log.Info("fetched new version from another site", "version", r.Version, "site", pr.site[:8])
 		newest = r.Version
 	}
 	if s.GitHubChecks() {

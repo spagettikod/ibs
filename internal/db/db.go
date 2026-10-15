@@ -271,6 +271,10 @@ var migrations = []string{
 	`ALTER TABLE peers ADD COLUMN releases TEXT NOT NULL DEFAULT '[]'`,
 	`ALTER TABLE peers ADD COLUMN min_compatible TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE network ADD COLUMN min_compatible TEXT NOT NULL DEFAULT ''`,
+	// Relay renames: when a relay's address was set by hand (0 = never), here
+	// and as each connected site reports it, so the newest address spreads.
+	`ALTER TABLE relays ADD COLUMN address_set INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE peers ADD COLUMN relay_addresses TEXT NOT NULL DEFAULT '[]'`,
 }
 
 func Open(path string) (*sql.DB, error) {

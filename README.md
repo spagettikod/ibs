@@ -503,11 +503,11 @@ get the new token automatically, so their invites stay valid.
 
 </details>
 
-<details><summary><b>The relay moved to a new address</b></summary>
+<details><summary><b>The relay moved or has a new name</b></summary>
 
 On one site, **The Known Universe → Relays → Edit address** next to the relay. The token
 stays the same. The other sites using that relay pick up the new address from it within
-a minute or two and reconnect. A site that can't reach any other site meanwhile needs
+a minute or two and reconnect, also when the old address still works. A site that can't reach any other site meanwhile needs
 the new address set on it too.
 
 </details>

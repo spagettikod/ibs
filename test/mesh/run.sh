@@ -54,13 +54,21 @@ echo "A relay moves"
 # relay-1 gets another address: only its new name reaches it now.
 # A restart drops the connections to it, as a real move to a new IP would.
 docker network disconnect ibs-mesh_net ibs-mesh-relay-1-1 >/dev/null &&
-  docker network connect --alias relay-1-moved ibs-mesh_net ibs-mesh-relay-1-1 >/dev/null &&
+  docker network connect --alias relay-1-moved --alias relay-1-renamed ibs-mesh_net ibs-mesh-relay-1-1 >/dev/null &&
   docker restart ibs-mesh-relay-1-1 >/dev/null
 R1=$(api site-a GET /api/relays | tr '{' '\n' | grep '"address":"relay-1:7444"' | sed -n 's/.*"id":"\([0-9a-f]*\)".*/\1/p')
 api site-a PATCH /api/relays/$R1 '{"address":"relay-1-moved:7444"}' >/dev/null
 check "site-a reaches it at its new address"    wait_for 30 bash -c "$(declare -f api dc); api site-a GET /api/relays | tr '{' '\\n' | grep '\"address\":\"relay-1-moved:7444\"' | grep -q '\"connected\":true'"
 relay_moved() { api "$1" GET /api/relays | tr '{' '\n' | grep '"address":"relay-1-moved:7444"' | grep -q '"connected":true'; }
 check "site-b, also on it, follows on its own" wait_for 90 bash -c "$(declare -f api dc relay_moved); relay_moved site-b"
+
+echo "A relay is renamed"
+# Both names reach relay-1: site-b's still works, yet it takes the newer one.
+api site-a PATCH /api/relays/$R1 '{"address":"relay-1-renamed:7444"}' >/dev/null
+relay_renamed() { api "$1" GET /api/relays | tr '{' '\n' | grep '"address":"relay-1-renamed:7444"' | grep -q '"connected":true'; }
+check "site-a uses the new name"                wait_for 30 bash -c "$(declare -f api dc relay_renamed); relay_renamed site-a"
+check "site-b takes it although the old works"  wait_for 90 bash -c "$(declare -f api dc relay_renamed); relay_renamed site-b"
+check "site-b says where it came from"          bash -c "$(declare -f dc); dc logs site-b 2>&1 | grep -q 'relay has a new address, set on another site'"
 
 echo "Leaving"
 check "site-c leaves the IBS"                   bash -c "$(declare -f api dc); api site-c POST /api/ibs/leave; [ \$? -eq 0 ]"

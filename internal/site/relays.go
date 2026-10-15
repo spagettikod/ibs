@@ -208,20 +208,27 @@ func (s *Site) waitRelay(id string, timeout time.Duration) bool {
 	return false
 }
 
-// SetRelayAddress changes the address of a relay, e.g. after it moved. The
-// relay keeps its key, so registration and routes stay valid.
+// SetRelayAddress changes the address of a relay, e.g. after it moved or was
+// renamed. The relay keeps its key, so registration and routes stay valid.
+// Other sites using the relay take the new address too (followRelayMoves).
 func (s *Site) SetRelayAddress(id, address string) error {
 	address = relayAddr(address)
 	if address == "" {
 		return errors.New("the relay's address is required (host:7444)")
 	}
+	return s.setRelayAddress(id, address, time.Now().Unix())
+}
+
+// setRelayAddress changes a relay's address, recording when it was set (by
+// hand here, or on the site this one learned it from).
+func (s *Site) setRelayAddress(id, address string, set int64) error {
 	var key []byte
 	var secret string
 	var added int64
 	if err := s.DB.QueryRow(`SELECT pubkey, secret, added FROM relays WHERE id = ?`, id).Scan(&key, &secret, &added); err != nil {
 		return errors.New("no such relay")
 	}
-	if _, err := s.DB.Exec(`UPDATE relays SET address = ? WHERE id = ?`, address, id); err != nil {
+	if _, err := s.DB.Exec(`UPDATE relays SET address = ?, address_set = ? WHERE id = ?`, address, set, id); err != nil {
 		return err
 	}
 	s.runRelay(relay.Token{Address: address, Key: key, Secret: secret}, added)
@@ -287,4 +294,27 @@ func (s *Site) commonRelay(routes Routes) *relay.Client {
 		}
 	}
 	return best
+}
+
+// RelayAddress is the address a site uses for a relay, and when it was set by
+// hand (0 = never): the most recently set address spreads to other sites.
+type RelayAddress struct {
+	Relay   string `json:"relay"`
+	Address string `json:"address"`
+	Set     int64  `json:"set"`
+}
+
+func (s *Site) relayAddresses() []RelayAddress {
+	rows, err := s.DB.Query(`SELECT id, address, address_set FROM relays WHERE address_set > 0 ORDER BY id`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []RelayAddress
+	for rows.Next() {
+		var a RelayAddress
+		rows.Scan(&a.Relay, &a.Address, &a.Set)
+		out = append(out, a)
+	}
+	return out
 }

@@ -158,11 +158,13 @@ type SiteStatus struct {
 	Links    []Link    `json:"links"`
 	// RelayTokens are this site's relays, so its members can register with
 	// them; Members are the other sites in the IBS it knows how to reach.
-	RelayTokens []string  `json:"relay_tokens,omitempty"`
-	Members     []Member  `json:"members,omitempty"`
-	Joined      int64     `json:"joined,omitempty"`
-	Location    *Location `json:"location,omitempty"`
-	Version     string    `json:"version,omitempty"`
+	RelayTokens []string `json:"relay_tokens,omitempty"`
+	// RelayAddresses: relay addresses set by hand, with when, so renames spread.
+	RelayAddresses []RelayAddress `json:"relay_addresses,omitempty"`
+	Members        []Member       `json:"members,omitempty"`
+	Joined         int64          `json:"joined,omitempty"`
+	Location       *Location      `json:"location,omitempty"`
+	Version        string         `json:"version,omitempty"`
 	// Updates: the oldest version this one works with, and the versions it
 	// holds (other sites may fetch those signed with a key they trust).
 	MinCompatible string       `json:"min_compatible,omitempty"`
@@ -177,6 +179,7 @@ func (s *Site) Status() SiteStatus {
 	st.Routes = s.OwnRoutes()
 	st.Links = s.NetworkLinks()
 	st.RelayTokens = s.relayTokens()
+	st.RelayAddresses = s.relayAddresses()
 	st.Members = s.members()
 	st.Joined = s.SettingInt("joined_at")
 	st.Location = s.Location()
@@ -498,12 +501,18 @@ func (s *Site) checkPeer(ctx context.Context, siteID string) {
 		tj, _ := json.Marshal(st.RelayTokens)
 		s.DB.Exec(`UPDATE peers SET relay_tokens = ? WHERE site_id = ? AND relay_tokens != ?`, string(tj), siteID, string(tj))
 	}
+	aj, _ := json.Marshal(nonNil(st.RelayAddresses))
+	s.DB.Exec(`UPDATE peers SET relay_addresses = ? WHERE site_id = ? AND relay_addresses != ?`, string(aj), siteID, string(aj))
 	s.DB.Exec(`UPDATE peers SET joined = ? WHERE site_id = ? AND joined != ?`, st.Joined, siteID, st.Joined)
 	loc := locationJSON(st.Location)
 	s.DB.Exec(`UPDATE peers SET location = ? WHERE site_id = ? AND location != ?`, loc, siteID, loc)
 	s.DB.Exec(`UPDATE peers SET version = ? WHERE site_id = ? AND version != ?`, st.Version, siteID, st.Version)
 	rj, _ := json.Marshal(nonNil(st.Releases))
-	s.DB.Exec(`UPDATE peers SET releases = ?, min_compatible = ? WHERE site_id = ?`, string(rj), st.MinCompatible, siteID)
+	res, _ := s.DB.Exec(`UPDATE peers SET releases = ?, min_compatible = ? WHERE site_id = ? AND (releases != ? OR min_compatible != ?)`,
+		string(rj), st.MinCompatible, siteID, string(rj), st.MinCompatible)
+	if n, _ := res.RowsAffected(); n > 0 {
+		s.noticeReleases(ctx, st)
+	}
 	s.learnMembers(st.Members)
 	for _, n := range st.Network {
 		if n.SiteID == s.ID.SiteID || n.SiteID == "" {
