@@ -4,7 +4,7 @@ The relay (`ghcr.io/spagettikod/ibs/relay`) is versioned separately from IBS and
 released when it changes. Before 1.2.0, its changes are in the IBS changelog. Each
 release says which IBS versions it works with.
 
-## Unreleased (1.4.0)
+## 1.4.0
 
 **What to update:** relays, by pulling the new image (keep `/data`). Needed for short
 invite codes; sites keep working with older relays, with long invites.

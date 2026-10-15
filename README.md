@@ -98,7 +98,7 @@ IBS runs in Docker. Choose your case; the ports each machine needs are under
      -v /srv/ibs-relay:/data \
      -p 7444:7444/tcp \
      -p 7444:7444/udp \
-     ghcr.io/spagettikod/ibs/relay:1.3.0
+     ghcr.io/spagettikod/ibs/relay:1.4.0
    ```
 
    Or with Docker Compose:
@@ -106,7 +106,7 @@ IBS runs in Docker. Choose your case; the ports each machine needs are under
    ```yaml
    services:
      ibs-relay:
-       image: ghcr.io/spagettikod/ibs/relay:1.3.0
+       image: ghcr.io/spagettikod/ibs/relay:1.4.0
        container_name: ibs-relay
        restart: unless-stopped
        ports:

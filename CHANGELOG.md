@@ -3,27 +3,24 @@
 Each release says what to update and which launcher and relay it works with: IBS,
 the launcher and the relay are released separately.
 
-## Unreleased
+## 1.4.0
 
+**What to update:** sites, under **Settings → Updates**; nodes follow. Relays: pull
+`ghcr.io/spagettikod/ibs/relay:1.4.0` (keep `/data`) for short invite codes.
+
+**Works with:** launcher 1.0.0, relay 1.2.0 or newer (1.4.0 for short invite codes).
+
+- **Short invite codes**, like `relay.example.com 7-comet-harbor-violet`. A code works
+  once; a wrong guess spends it, and the relay can't read or use it.
+- **Long invites are half as long** (`ibs2.…`). Old `ibs1.` invites work until 1.5.0.
 - **Room for your own files:** other sites' copies may use at most half of a site's
-  storage (**Settings → General** changes the share), so a small site isn't filled up
-  by the others. The dashboard warns when a full site holds up copies.
-- **The network diagram** has no labels: names show when you point at a site or relay,
-  and ping and speed are in a connection's details.
-- **Relay moves spread:** when a relay gets a new address, set it on one site; the other
-  sites using that relay pick it up and reconnect.
-- **Install new versions automatically** (Settings → Updates), as soon as they're
-  downloaded and work with the site and the IBS.
-- **The Known Universe shows the storage each site shares**, how much of it is free, and
-  the total for the whole IBS.
-- **Short invite codes**, like `relay.example.com 7-comet-harbor-violet`: short enough
-  to read out. Only the site that enters the code gets in, a wrong guess makes it stop
-  working, and the relay passing it on can't read or use it. Needs a relay of version
-  1.4.0 or newer; otherwise **Invite a site** gives the long invite.
-- **Long invites are about half as long** (they start with `ibs2.`). Joining with one
-  needs this version or newer; older `ibs1.` invites still work until 1.5.0.
-- Releases are signed with OpenSSL; `ibs-sign` is replaced by `ibs-release`, which never
-  sees the key (see DEVELOPMENT.md).
+  storage (adjustable under **Settings → General**). The dashboard warns when a full site
+  holds up copies.
+- **Relay moves spread:** set a relay's new address on one site; the others follow.
+- **Install new versions automatically** (optional, **Settings → Updates**).
+- **The Known Universe** shows the storage each site shares, and the total.
+- **The network diagram** has no labels; names show when you point at a site or relay.
+- Releases are signed with OpenSSL (see DEVELOPMENT.md).
 
 ## 1.3.3
 
