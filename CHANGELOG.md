@@ -3,6 +3,12 @@
 Each release says what to update and which launcher and relay it works with: IBS,
 the launcher and the relay are released separately.
 
+## Unreleased
+
+- **Relays spread:** a relay added or removed on one site is added or removed on the
+  others. A site keeps a relay that is its only way to be reached.
+- `IBS_RELAY_ADDRESS` no longer undoes a relay's newer address when a site restarts.
+
 ## 1.5.1
 
 **What to update:** sites, under **Settings → Updates**; nodes follow. A site still on

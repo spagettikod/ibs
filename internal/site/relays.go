@@ -62,8 +62,8 @@ func (s *Site) startRelays(ctx context.Context) {
 			s.runRelay(x.t, x.added)
 		}
 	}
-	if s.cfg.RelayToken != "" {
-		if _, err := s.AddRelay(s.cfg.RelayAddress, s.cfg.RelayToken); err != nil {
+	if s.cfg.RelayToken != "" && !s.relayRemoved(s.cfg.RelayToken, "IBS_RELAY_TOKEN") {
+		if _, err := s.addConfiguredRelay(s.cfg.RelayToken); err != nil {
 			s.log.Warn("IBS_RELAY_TOKEN", "err", err)
 		}
 	}
@@ -78,8 +78,8 @@ func (s *Site) watchRelayTokenFile(ctx context.Context) {
 	last := ""
 	for {
 		if b, err := os.ReadFile(s.cfg.RelayTokenFile); err == nil {
-			if tok := strings.TrimSpace(string(b)); tok != "" && tok != last {
-				if _, err := s.AddRelay(s.cfg.RelayAddress, tok); err != nil {
+			if tok := strings.TrimSpace(string(b)); tok != "" && tok != last && !s.relayRemoved(tok, "IBS_RELAY_TOKEN_FILE") {
+				if _, err := s.addConfiguredRelay(tok); err != nil {
 					s.log.Warn("relay token file", "err", err)
 				} else {
 					last = tok
@@ -92,6 +92,42 @@ func (s *Site) watchRelayTokenFile(ctx context.Context) {
 		case <-time.After(5 * time.Second):
 		}
 	}
+}
+
+// addConfiguredRelay adds the relay from IBS_RELAY_ADDRESS and the token. When
+// the relay's address was changed since (here or on another site, see
+// followRelayMoves), that address is kept: the configured one may be its old
+// name.
+func (s *Site) addConfiguredRelay(token string) (*RelayInfo, error) {
+	address := s.cfg.RelayAddress
+	if t, err := relay.ParseToken(token); err == nil {
+		var current string
+		var set int64
+		if s.DB.QueryRow(`SELECT address, address_set FROM relays WHERE id = ?`, relay.ID(t.Key)).Scan(&current, &set) == nil &&
+			set > 0 && current != relayAddr(address) {
+			if address != "" {
+				s.log.Info("the relay's address was changed since; using the new one instead of IBS_RELAY_ADDRESS", "relay", current, "configured", address)
+			}
+			address = current
+		}
+	}
+	return s.AddRelay(address, token)
+}
+
+// relayRemoved reports whether the relay of a configured token was removed by
+// hand (here or on another site) and isn't in use: the configuration doesn't
+// bring it back.
+func (s *Site) relayRemoved(token, setting string) bool {
+	t, err := relay.ParseToken(token)
+	if err != nil {
+		return false
+	}
+	var n int
+	s.DB.QueryRow(`SELECT COUNT(*) FROM removed_relays WHERE id = ? AND id NOT IN (SELECT id FROM relays)`, relay.ID(t.Key)).Scan(&n)
+	if n > 0 {
+		s.log.Warn(setting+" names a relay that was removed; remove it from the configuration, or add the relay again under The Known Universe", "relay", t.Address)
+	}
+	return n > 0
 }
 
 func (s *Site) runRelay(t relay.Token, added int64) *relay.Client {
@@ -170,6 +206,12 @@ func relayAddr(addr string) string {
 // it (older tokens and invites). Peers learn the new route from this site's
 // status.
 func (s *Site) AddRelay(address, token string) (*RelayInfo, error) {
+	return s.addRelay(address, token, time.Now().Unix())
+}
+
+// addRelay adds a relay as added at the given time: now, or when it was added
+// on the site this one learned it from (followRelayChanges).
+func (s *Site) addRelay(address, token string, added int64) (*RelayInfo, error) {
 	t, err := relay.ParseToken(token)
 	if err != nil {
 		return nil, err
@@ -180,12 +222,13 @@ func (s *Site) AddRelay(address, token string) (*RelayInfo, error) {
 	if t.Address == "" {
 		return nil, errors.New("the relay's address is required (host:7444)")
 	}
-	now := time.Now().Unix()
+	now := added
 	if _, err := s.DB.Exec(`INSERT INTO relays(id, address, pubkey, secret, added) VALUES(?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET address = excluded.address, secret = excluded.secret`,
 		relay.ID(t.Key), t.Address, []byte(t.Key), t.Secret, now); err != nil {
 		return nil, err
 	}
+	s.DB.Exec(`DELETE FROM removed_relays WHERE id = ? AND at <= ?`, relay.ID(t.Key), added)
 	if rc := s.relayClient(relay.ID(t.Key)); rc != nil && rc.Token.Address == t.Address && rc.CurrentToken().Secret == t.Secret {
 		return &RelayInfo{Status: rc.Status(), Name: relayName(t.Address), Added: now}, nil
 	}
@@ -237,7 +280,15 @@ func (s *Site) setRelayAddress(id, address string, set int64) error {
 	return nil
 }
 
+// RemoveRelay stops using a relay. The other sites in the IBS stop using it too
+// (followRelayChanges).
 func (s *Site) RemoveRelay(id string) error {
+	return s.removeRelay(id, time.Now().Unix())
+}
+
+// removeRelay removes a relay, recording when it was removed (here, or on the
+// site this one learned it from).
+func (s *Site) removeRelay(id string, at int64) error {
 	res, err := s.DB.Exec(`DELETE FROM relays WHERE id = ?`, id)
 	if err != nil {
 		return err
@@ -245,6 +296,7 @@ func (s *Site) RemoveRelay(id string) error {
 	if n, _ := res.RowsAffected(); n == 0 {
 		return errors.New("no such relay")
 	}
+	s.DB.Exec(`INSERT INTO removed_relays(id, at) VALUES(?, ?) ON CONFLICT(id) DO UPDATE SET at = max(at, excluded.at)`, id, at)
 	s.netMu.Lock()
 	if e := s.relays[id]; e != nil {
 		e.cancel()
@@ -296,16 +348,24 @@ func (s *Site) commonRelay(routes Routes) *relay.Client {
 	return best
 }
 
-// RelayAddress is the address a site uses for a relay, and when it was set by
-// hand (0 = never): the most recently set address spreads to other sites.
+// RelayAddress is a relay a site uses: its address, when that was set by hand
+// (0 = never), and when the relay was added. The most recently set address,
+// and the latest of adding and removing a relay, spread to other sites.
 type RelayAddress struct {
 	Relay   string `json:"relay"`
 	Address string `json:"address"`
 	Set     int64  `json:"set"`
+	Added   int64  `json:"added,omitempty"`
+}
+
+// RelayRemoval is a relay removed by hand on some site, and when.
+type RelayRemoval struct {
+	Relay string `json:"relay"`
+	At    int64  `json:"at"`
 }
 
 func (s *Site) relayAddresses() []RelayAddress {
-	rows, err := s.DB.Query(`SELECT id, address, address_set FROM relays WHERE address_set > 0 ORDER BY id`)
+	rows, err := s.DB.Query(`SELECT id, address, address_set, added FROM relays ORDER BY id`)
 	if err != nil {
 		return nil
 	}
@@ -313,8 +373,23 @@ func (s *Site) relayAddresses() []RelayAddress {
 	var out []RelayAddress
 	for rows.Next() {
 		var a RelayAddress
-		rows.Scan(&a.Relay, &a.Address, &a.Set)
+		rows.Scan(&a.Relay, &a.Address, &a.Set, &a.Added)
 		out = append(out, a)
+	}
+	return out
+}
+
+func (s *Site) relayRemovals() []RelayRemoval {
+	rows, err := s.DB.Query(`SELECT id, at FROM removed_relays ORDER BY id`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []RelayRemoval
+	for rows.Next() {
+		var r RelayRemoval
+		rows.Scan(&r.Relay, &r.At)
+		out = append(out, r)
 	}
 	return out
 }

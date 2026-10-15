@@ -3,6 +3,7 @@
 # invited to each other connect through what their peers tell them and copies
 # reach them; a site that leaves is forgotten everywhere (also by sites that
 # were offline) and can rejoin with a new invite.
+# Relays added or removed on one site are added or removed on the others.
 # Needs: docker and the "ibs" and "ibs-relay" images.
 #
 #   docker build -t ibs . && docker build -t ibs-relay --target relay . && test/mesh/run.sh
@@ -69,6 +70,22 @@ relay_renamed() { api "$1" GET /api/relays | tr '{' '\n' | grep '"address":"rela
 check "site-a uses the new name"                wait_for 30 bash -c "$(declare -f api dc relay_renamed); relay_renamed site-a"
 check "site-b takes it although the old works"  wait_for 90 bash -c "$(declare -f api dc relay_renamed); relay_renamed site-b"
 check "site-b says where it came from"          bash -c "$(declare -f dc); dc logs site-b 2>&1 | grep -q 'relay has a new address, set on another site'"
+
+echo "Relays spread"
+has_relay() { api "$1" GET /api/relays | grep -q "\"address\":\"$2"; }
+check "site-c, on relay-2, uses relay-1 too"   wait_for 60 bash -c "$(declare -f api dc has_relay); has_relay site-c relay-1"
+T3=$(dc exec -T relay-3 cat /share/token)
+api site-a POST /api/relays "{\"address\":\"relay-3:7444\",\"token\":\"$T3\"}" >/dev/null
+relay3_up() { api "$1" GET /api/relays | tr '{' '\n' | grep '"address":"relay-3:7444"' | grep -q '"connected":true'; }
+check "a relay added on site-a"                 wait_for 30 bash -c "$(declare -f api dc relay3_up); relay3_up site-a"
+check "is added on site-b and site-c too"       wait_for 60 bash -c "$(declare -f api dc relay3_up); relay3_up site-b && relay3_up site-c"
+check "and they say where it came from"         bash -c "$(declare -f dc); dc logs site-b 2>&1 | grep -q 'relay added on another site.*relay-3'"
+R2=$(api site-a GET /api/relays | tr '{' '\n' | grep '"address":"relay-2:7444"' | sed -n 's/.*"id":"\([0-9a-f]*\)".*/\1/p')
+api site-a DELETE /api/relays/$R2 >/dev/null
+check "site-a removes relay-2; the others too"  wait_for 60 bash -c "$(declare -f api dc has_relay); ! has_relay site-b relay-2 && ! has_relay site-c relay-2"
+check "and say where that came from"           bash -c "$(declare -f dc); dc logs site-b 2>&1 | grep -q 'relay removed on another site'"
+check "it doesn't come back"                    bash -c "sleep 15; $(declare -f api dc has_relay); ! has_relay site-a relay-2 && ! has_relay site-b relay-2"
+check "site-c still reaches the others"         wait_for 30 bash -c "$(declare -f api dc peer_of); peer_of site-c site-a && peer_of site-c site-b"
 
 echo "Leaving"
 check "site-c leaves the IBS"                   bash -c "$(declare -f api dc); api site-c POST /api/ibs/leave; [ \$? -eq 0 ]"

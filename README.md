@@ -484,10 +484,12 @@ Direct connections keep working. Connections through the relay stop, and sites k
 retrying it. To move to a new relay:
 
 1. Run a new one (step 1 of Setup).
-2. Add it on every site with **The Known Universe → Add relay**.
+2. Add it on one site with **The Known Universe → Add relay**.
 3. Remove the old one there.
 
-Sites find each other again on their own; no new invites are needed. Tip: use two
+The other sites follow within a minute or two, if they can still reach that site
+(directly or through another relay); otherwise do the same on them. No new invites are
+needed. Tip: use two
 relays.
 
 </details>

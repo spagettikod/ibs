@@ -161,6 +161,7 @@ type SiteStatus struct {
 	RelayTokens []string `json:"relay_tokens,omitempty"`
 	// RelayAddresses: relay addresses set by hand, with when, so renames spread.
 	RelayAddresses []RelayAddress `json:"relay_addresses,omitempty"`
+	RelayRemovals  []RelayRemoval `json:"relay_removals,omitempty"`
 	Members        []Member       `json:"members,omitempty"`
 	Joined         int64          `json:"joined,omitempty"`
 	Location       *Location      `json:"location,omitempty"`
@@ -180,6 +181,7 @@ func (s *Site) Status() SiteStatus {
 	st.Links = s.NetworkLinks()
 	st.RelayTokens = s.relayTokens()
 	st.RelayAddresses = s.relayAddresses()
+	st.RelayRemovals = s.relayRemovals()
 	st.Members = s.members()
 	st.Joined = s.SettingInt("joined_at")
 	st.Location = s.Location()
@@ -503,6 +505,8 @@ func (s *Site) checkPeer(ctx context.Context, siteID string) {
 	}
 	aj, _ := json.Marshal(nonNil(st.RelayAddresses))
 	s.DB.Exec(`UPDATE peers SET relay_addresses = ? WHERE site_id = ? AND relay_addresses != ?`, string(aj), siteID, string(aj))
+	rmj, _ := json.Marshal(nonNil(st.RelayRemovals))
+	s.DB.Exec(`UPDATE peers SET relay_removals = ? WHERE site_id = ? AND relay_removals != ?`, string(rmj), siteID, string(rmj))
 	s.DB.Exec(`UPDATE peers SET joined = ? WHERE site_id = ? AND joined != ?`, st.Joined, siteID, st.Joined)
 	loc := locationJSON(st.Location)
 	s.DB.Exec(`UPDATE peers SET location = ? WHERE site_id = ? AND location != ?`, loc, siteID, loc)

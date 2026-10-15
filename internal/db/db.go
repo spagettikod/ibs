@@ -146,6 +146,13 @@ CREATE TABLE IF NOT EXISTS relays (
 	added   INTEGER NOT NULL
 );
 
+-- Relays removed by hand here or on another site, and when: a relay another
+-- site still lists is only added again if it was added there after that.
+CREATE TABLE IF NOT EXISTS removed_relays (
+	id TEXT PRIMARY KEY,
+	at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS invites (
 	secret  TEXT PRIMARY KEY,
 	created INTEGER NOT NULL,
@@ -275,6 +282,7 @@ var migrations = []string{
 	// and as each connected site reports it, so the newest address spreads.
 	`ALTER TABLE relays ADD COLUMN address_set INTEGER NOT NULL DEFAULT 0`,
 	`ALTER TABLE peers ADD COLUMN relay_addresses TEXT NOT NULL DEFAULT '[]'`,
+	`ALTER TABLE peers ADD COLUMN relay_removals TEXT NOT NULL DEFAULT '[]'`,
 }
 
 func Open(path string) (*sql.DB, error) {

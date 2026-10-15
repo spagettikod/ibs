@@ -1,7 +1,8 @@
-# IBS membership test: three sites and two relays. site-a uses relay-1, site-c
+# IBS membership test: three sites and three relays. site-a uses relay-1, site-c
 # relay-2, site-b none of its own. site-b joins site-a and site-a joins site-c,
 # so site-b and site-c are never invited to each other and share no relay at
-# first: they must still connect, through what the IBS tells them.
+# first: they must still connect, through what the IBS tells them. relay-3 is
+# added to site-a later; the others take it up.
 x-site: &site
   image: ibs
   environment: &env
@@ -21,6 +22,11 @@ services:
     environment: { IBS_RELAY_ADVERTISE: "relay-2:7444", IBS_RELAY_TOKEN_OUT: /share/token }
     volumes: [relay2:/share]
     networks: [net]
+  relay-3: # added to site-a later; the others follow
+    image: ibs-relay
+    environment: { IBS_RELAY_ADVERTISE: "relay-3:7444", IBS_RELAY_TOKEN_OUT: /share/token }
+    volumes: [relay3:/share]
+    networks: [net]
   site-a:
     <<: *site
     environment: { <<: *env, IBS_SITE_NAME: site-a, IBS_RELAY_ADDRESS: "relay-1:7444", IBS_RELAY_TOKEN_FILE: /relay/token }
@@ -39,5 +45,5 @@ services:
     entrypoint: ["sleep", "infinity"]
     networks: [net]
 
-volumes: { relay1: {}, relay2: {} }
+volumes: { relay1: {}, relay2: {}, relay3: {} }
 networks: { net: {} }
