@@ -40,6 +40,8 @@ function attention(d: Dashboard, tls?: TLSStatus, updates?: UpdatesInfo, scrub?:
   }
   for (const p of d.peers ?? []) {
     if (!p.online) out.push({ level: 'warn', text: `Site ${p.name} is offline (seen ${ago(p.last_seen)})`, href: '#/network', link: 'The Known Universe' })
+    // A site with no room left for copies holds up the IBS: copies wait for it.
+    else if (r.under_replicated > 0 && p.free < 4 << 20) out.push({ level: 'warn', text: `Site ${p.name} has no room left for copies, so ${r.under_replicated} blocks can't get all their copies`, href: '#/network', link: 'The Known Universe' })
   }
   if (c.sites > 0 && c.sites < c.copies) {
     out.push({ level: 'warn', text: `Files have ${c.sites} of ${c.copies} copies on other sites: only ${c.sites} other ${c.sites === 1 ? 'site is' : 'sites are'} online`, href: '#/network', link: 'The Known Universe' })

@@ -641,8 +641,9 @@ automatically. See [Updates](#updates).
 **How much space do I share with the IBS?**
 
 What your nodes' limits allow (**Nodes → Change**, or `IBS_STORAGE_LIMIT`). Your own
-files and other sites' copies share that space; there's no separate limit for either.
-The dashboard's storage tile shows how much other sites' copies use.
+files can use all of it; other sites' copies at most half, so they never crowd out your
+files (**Settings → General** changes the share). **The Known Universe** shows what each
+site shares, and the dashboard warns when a full site holds up copies.
 
 ## Limitations
 

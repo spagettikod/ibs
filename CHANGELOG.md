@@ -5,6 +5,9 @@ the launcher and the relay are released separately.
 
 ## Unreleased
 
+- **Room for your own files:** other sites' copies may use at most half of a site's
+  storage (**Settings → General** changes the share), so a small site isn't filled up
+  by the others. The dashboard warns when a full site holds up copies.
 - **The network diagram** shows names when you point at a site or relay, instead of a
   label under each.
 - **The Known Universe shows the storage each site shares**, how much of it is free, and

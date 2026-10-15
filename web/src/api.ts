@@ -71,7 +71,7 @@ export type NetSite = {
 
 export type Dashboard = {
   site: {
-    site_id: string; name: string; up_since: number; capacity: number; free: number; offered: number
+    site_id: string; name: string; up_since: number; capacity: number; free: number; offered: number; offered_total: number
     generation: number; peer_advertise: string; web_host?: string; buckets: number; objects: number; object_bytes: number
     held_blocks: number; held_bytes: number; restored: number; location?: Location
   }
@@ -104,7 +104,7 @@ export type ObjectInfo = { bucket: string; key: string; size: number; etag: stri
 
 export type AccessKey = { id: string; name: string; created: string; secret?: string }
 
-export type Settings = { site_name: string; peer_advertise: string }
+export type Settings = { site_name: string; peer_advertise: string; peer_share: number }
 
 export type TLSSettings = {
   domains: string[]

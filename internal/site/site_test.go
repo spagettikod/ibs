@@ -446,3 +446,33 @@ func TestNodeQuotaConcurrentWrites(t *testing.T) {
 		t.Fatalf("stored %d blocks of 1 MiB within a 5 MiB limit", n)
 	}
 }
+
+// Other sites' copies may only use their share of a site's storage, so the
+// site's own files always keep room.
+func TestPeerShare(t *testing.T) {
+	s := newTestSite(t)
+	ctx := context.Background()
+	s.cfg.StorageLimit = 10 << 20
+	s.refreshLocalNode(ctx)
+	if s.PeerShare() != defaultPeerShare {
+		t.Fatalf("default share %d", s.PeerShare())
+	}
+	capacity, free := s.offeredStorage()
+	if capacity != 5<<20 || free != 5<<20 {
+		t.Fatalf("offered %d, %d free; want 5 MiB of 10", capacity, free)
+	}
+	// 4 MiB of copies kept for another site: 1 MiB of the share is left.
+	s.DB.Exec(`INSERT INTO held_blocks(owner, id, size, node_id, stored, verified) VALUES('peer', 'x', ?, ?, 0, 0)`, 4<<20, LocalNodeID)
+	if _, free := s.offeredStorage(); free != 1<<20 {
+		t.Fatalf("free share %d, want 1 MiB", free)
+	}
+	if err := s.UpdateSettings(Settings{SiteName: "test", PeerShare: 100}); err != nil {
+		t.Fatal(err)
+	}
+	if capacity, _ := s.offeredStorage(); capacity != 10<<20 {
+		t.Fatalf("100%%: offered %d", capacity)
+	}
+	if s.UpdateSettings(Settings{SiteName: "test", PeerShare: 5}) == nil {
+		t.Fatal("accepted a share below 10%")
+	}
+}

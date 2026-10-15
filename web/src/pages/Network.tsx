@@ -50,7 +50,8 @@ export default function NetworkPage() {
   const indirect = (data?.network ?? []).filter((n) => !peerIds.has(n.site_id))
   const reachable = !!data && (!!data.site.peer_advertise || relays.length > 0)
   // What all sites share together: this one and every one it knows of.
-  const all = data ? [data.site, ...data.network] : []
+  // Every site reports what it offers other sites' copies; this one too.
+  const all = data ? [{ capacity: data.site.offered_total, free: data.site.offered }, ...data.network] : []
   const shared = all.reduce((n, s) => n + (s.capacity || 0), 0)
   const sharedFree = all.reduce((n, s) => n + (s.free || 0), 0)
 
