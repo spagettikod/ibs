@@ -5,6 +5,8 @@ the launcher and the relay are released separately.
 
 ## Unreleased
 
+- **The network diagram** shows names when you point at a site or relay, instead of a
+  label under each.
 - **The Known Universe shows the storage each site shares**, how much of it is free, and
   the total for the whole IBS.
 - **Invites are about half as long** (they start with `ibs2.`). Joining with one needs

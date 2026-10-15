@@ -57,6 +57,7 @@ function edgeClass(l: Link) {
  */
 export default function NetworkGraph({ selfId, selfName, selfUpSince, sites, links, relays, compact }: Props) {
   const [selected, setSelected] = useState<string>()
+  const [hover, setHover] = useState<string>() // node or 'relay:<id>' under the pointer: its name is shown
   const { ref, width } = useWidth()
   const W = Math.max(width, 300)
   const narrow = W < 520
@@ -167,20 +168,35 @@ export default function NetworkGraph({ selfId, selfName, selfUpSince, sites, lin
         })}
         {relayPos.map((r) => (
           <g key={r.id} className={`relay-node ${sel === 'relay:' + r.id ? 'selected' : ''}`} transform={`translate(${r.x},${r.y})`}
-            onClick={() => setSelected('relay:' + r.id)}>
+            onClick={() => setSelected('relay:' + r.id)} onMouseEnter={() => setHover('relay:' + r.id)} onMouseLeave={() => setHover(undefined)}>
             <rect x={-14} y={-14} width={28} height={28} rx={6} transform="rotate(45)" />
             <text textAnchor="middle" y={4} className="relay-glyph">R</text>
-            <text textAnchor="middle" y={32} className="node-name small">{r.name}</text>
           </g>
         ))}
         {nodes.map((n) => (
           <g key={n.id} className={`site-node ${n.self ? 'self' : ''} ${n.online ? '' : 'offline'} ${sel === n.id ? 'selected' : ''}`}
-            transform={`translate(${n.x},${n.y})`} onClick={() => setSelected(n.id)}>
+            transform={`translate(${n.x},${n.y})`} onClick={() => setSelected(n.id)}
+            onMouseEnter={() => setHover(n.id)} onMouseLeave={() => setHover(undefined)}>
             <circle r={n.self ? 24 : 20} />
             <text textAnchor="middle" y={5} className="initials">{initials(n.name)}</text>
-            <text textAnchor="middle" y={n.self ? 42 : 38} className="node-name">{n.name}{n.self ? ' (this site)' : ''}</text>
           </g>
         ))}
+        {(() => {
+          // The name of the site or relay under the pointer, above it.
+          const n = hover && !hover.startsWith('relay:') ? node(hover) : undefined
+          const r = hover?.startsWith('relay:') ? relayPos.find((x) => 'relay:' + x.id === hover) : undefined
+          const at = n ?? r
+          if (!at) return null
+          const text = n ? n.name + (n.self ? ' (this site)' : '') : r!.name
+          const w = 16 + text.length * 6.8
+          const y = at.y - (n ? (n.self ? 24 : 20) : 18) - 18
+          return (
+            <g className="node-tip" transform={`translate(${Math.min(Math.max(at.x, w / 2 + 2), W - w / 2 - 2)},${Math.max(y, 13)})`} pointerEvents="none">
+              <rect x={-w / 2} y={-12} width={w} height={24} rx={6} />
+              <text textAnchor="middle" y={4}>{text}</text>
+            </g>
+          )
+        })()}
       </svg>
 
       <div className="netgraph-legend">

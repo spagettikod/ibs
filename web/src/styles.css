@@ -238,6 +238,8 @@ input:focus, textarea:focus, select:focus { outline: 2px solid color-mix(in srgb
 .netgraph .initials { fill: var(--text); font-size: 12px; font-weight: 600; }
 .netgraph .site-node.self .initials { fill: #fff; }
 .netgraph .node-name { fill: var(--text); font-size: 12.5px; }
+.netgraph .node-tip rect { fill: var(--panel); stroke: var(--border); filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.25)); }
+.netgraph .node-tip text { fill: var(--text); font-size: 12px; font-weight: 600; }
 .netgraph .node-name.small { font-size: 11px; fill: var(--muted); }
 .netgraph .relay-node rect { fill: var(--panel-2); stroke: var(--warn); stroke-width: 2; }
 .netgraph .relay-glyph { fill: var(--warn); font-size: 12px; font-weight: 700; }
