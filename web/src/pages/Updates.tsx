@@ -205,7 +205,7 @@ function UploadDialog({ onClose, onDone }: { onClose: () => void; onDone: (versi
       <form className="stack" onSubmit={submit}>
         <p className="muted small">
           An <span className="mono">.ibsrelease</span> file, for example from the GitHub release page or built and signed
-          yourself (<span className="mono">ibs-sign</span>). It must be signed with one of the release keys.
+          yourself (see DEVELOPMENT.md). It must be signed with one of the release keys.
         </p>
         <input ref={file} type="file" accept=".ibsrelease" onChange={(e) => setChosen(!!e.target.files?.length)} />
         <ErrorBox error={error} />
@@ -228,7 +228,7 @@ function KeyDialog({ onClose, onDone }: { onClose: () => void; onDone: () => voi
         <label>
           Public key
           <input autoFocus className="mono" value={key} placeholder="ibspub1:…" onChange={(e) => setKey(e.target.value)} />
-          <small className="muted">From <span className="mono">ibs-sign pubkey</span>, or copied from another site's release keys.</small>
+          <small className="muted">From <span className="mono">openssl pkey -pubout | ibs-release pubkey</span>, or copied from another site's release keys.</small>
         </label>
         <label>
           Name

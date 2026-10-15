@@ -25,10 +25,17 @@ mkdir -p "$WORK/rel" "$WORK/gh"
 (cd "$ROOT/web" && npm run build >/dev/null 2>&1)
 openssl genpkey -algorithm ed25519 -out "$WORK/test.key" || exit 1
 openssl genpkey -algorithm ed25519 -out "$WORK/other.key" || exit 1
-KEY=$(cd "$ROOT" && go run ./cmd/ibs-sign pubkey -key "$WORK/test.key")
+go build -o "$WORK/ibs-release" "$ROOT/cmd/ibs-release" || exit 1
+pubkey() { openssl pkey -in "$1" -pubout | "$WORK/ibs-release" pubkey; }
+sign() { # key version program out: a release signed with key, as release.sh makes them
+  "$WORK/ibs-release" manifest -version "$2" -platform "linux/$ARCH" "$3" >"$WORK/m.json" &&
+  openssl pkeyutl -sign -rawin -inkey "$1" -in "$WORK/m.json" -out "$WORK/m.sig" &&
+  "$WORK/ibs-release" pack -trust "$(pubkey "$1")" -o "$4" "$3" "$WORK/m.json" "$WORK/m.sig" >/dev/null
+}
+KEY=$(pubkey "$WORK/test.key")
 release() { # version key file
   (cd "$ROOT" && CGO_ENABLED=0 GOOS=linux GOARCH=$ARCH go build -trimpath -ldflags "-s -w -X ibs/internal/version.Version=$1" -o "$WORK/ibs-$1" ./cmd/ibs) &&
-  (cd "$ROOT" && go run ./cmd/ibs-sign sign -key "$2" -version "$1" -platform "linux/$ARCH" -o "$3" "$WORK/ibs-$1") >/dev/null
+  sign "$2" "$1" "$WORK/ibs-$1" "$3"
 }
 release 1.8.0 "$WORK/test.key" "$WORK/rel/ibs-1.8.0.ibsrelease" || exit 1
 release 1.9.0 "$WORK/test.key" "$WORK/gh/ibs-1.9.0-linux-$ARCH.ibsrelease" || exit 1
@@ -36,7 +43,7 @@ release 1.9.5-beta1 "$WORK/test.key" "$WORK/gh/ibs-1.9.5-beta1-linux-$ARCH.ibsre
 release 1.9.1 "$WORK/other.key" "$WORK/rel/untrusted.ibsrelease" || exit 1
 # 2.0.0 is a program that stops right away.
 printf '#!/bin/sh\necho "2.0.0 is broken"; exit 3\n' >"$WORK/broken"
-(cd "$ROOT" && go run ./cmd/ibs-sign sign -key "$WORK/test.key" -version 2.0.0 -platform "linux/$ARCH" -o "$WORK/rel/broken.ibsrelease" "$WORK/broken") >/dev/null
+sign "$WORK/test.key" 2.0.0 "$WORK/broken" "$WORK/rel/broken.ibsrelease"
 # Sites take 1.9.0 and leave the newer beta alone, unless betas are on.
 printf '[{"tag_name":"v1.9.5-beta1","prerelease":true,"assets":[{"name":"ibs-1.9.5-beta1-linux-%s.ibsrelease","browser_download_url":"http://gh/ibs-1.9.5-beta1-linux-%s.ibsrelease"}]},
 {"tag_name":"v1.9.0","assets":[{"name":"ibs-1.9.0-linux-%s.ibsrelease","browser_download_url":"http://gh/ibs-1.9.0-linux-%s.ibsrelease"}]}]' "$ARCH" "$ARCH" "$ARCH" "$ARCH" >"$WORK/gh/latest"
@@ -108,7 +115,7 @@ check "its storage node follows back"            wait_for 90 node_runs 1.8.0
 
 echo "Untrusted releases"
 check "a release signed by another key is refused" bash -c "upload $ID-a $WORK/rel/untrusted.ibsrelease | grep -q 'not signed by a trusted key'"
-OTHER=$(cd "$ROOT" && go run ./cmd/ibs-sign pubkey -key "$WORK/other.key")
+OTHER=$(pubkey "$WORK/other.key")
 check "after adding that key it is accepted"     bash -c "api $ID-a POST /api/updates/keys '{\"key\":\"$OTHER\",\"name\":\"other\"}' >/dev/null && upload $ID-a $WORK/rel/untrusted.ibsrelease | grep -q '\"version\":\"1.9.1\"'"
 OTHER_ID=$(api $ID-a GET /api/updates | grep -o '"id":"[0-9a-f]*","name":"other"' | sed 's/"id":"\([0-9a-f]*\)".*/\1/')
 check "its key can't be removed while 1.9.1 is installed" bash -c "api $ID-a DELETE /api/updates/keys/$OTHER_ID | grep -q 'remove them first'"

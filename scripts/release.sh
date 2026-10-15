@@ -6,6 +6,8 @@
 #
 # Options (environment):
 #   ARCHES         binary architectures (default amd64)
+#   IBS_SIGNING_KEY the release key, an Ed25519 key in OpenSSL's PEM format
+#                  (default ~/.config/ibs/signing.key)
 #   GITHUB_TOKEN   if set, create the GitHub release for tag v<version> and upload
 #                  the binaries (the tag must already be pushed)
 #   RELEASE_ONLY=1 skip building; only create the GitHub release from dist/<version>
@@ -16,6 +18,7 @@ VERSION=${1:?usage: scripts/release.sh <version>}
 ARCHES=${ARCHES:-amd64}
 REPO_API=https://api.github.com/repos/spagettikod/ibs
 DIST=dist/$VERSION
+SIGNING_KEY=${IBS_SIGNING_KEY:-$HOME/.config/ibs/signing.key}
 
 # The notes must say what to update and which launcher and relay this works with.
 notes=$(sed -n "/^## $VERSION\$/,/^## /p" CHANGELOG.md)
@@ -60,9 +63,15 @@ for arch in $ARCHES; do
   mkdir -p "$stage/systemd"
   CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags "$LDFLAGS" -o "$stage/ibs" ./cmd/ibs
   CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags "$LDFLAGS" -o "$stage/ibs-relay" ./cmd/ibs-relay
-  # The signed release the launcher installs and sites pass on (key: $IBS_SIGNING_KEY,
-  # by default ~/.config/ibs/signing.key).
-  go run ./cmd/ibs-sign sign -version "$VERSION" -platform "linux/$arch" -o "$DIST/$name.ibsrelease" "$stage/ibs"
+  # The signed release the launcher installs and sites pass on. OpenSSL signs the
+  # manifest with the release key ($IBS_SIGNING_KEY, by default
+  # ~/.config/ibs/signing.key); ibs-release never sees the key, and refuses a
+  # signature the built-in key doesn't verify.
+  sig=$DIST/sign-$arch && mkdir -p "$sig"
+  go run ./cmd/ibs-release manifest -version "$VERSION" -platform "linux/$arch" "$stage/ibs" >"$sig/manifest.json"
+  openssl pkeyutl -sign -rawin -inkey "$SIGNING_KEY" -in "$sig/manifest.json" -out "$sig/manifest.sig"
+  go run ./cmd/ibs-release pack -o "$DIST/$name.ibsrelease" "$stage/ibs" "$sig/manifest.json" "$sig/manifest.sig"
+  rm -rf "$sig"
   cp README.md LICENSE "$stage/"
   cp contrib/systemd/* "$stage/systemd/"
   tar -C "$DIST" -czf "$DIST/$name.tar.gz" "${TAR_FLAGS[@]}" "$name"

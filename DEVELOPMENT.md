@@ -7,7 +7,7 @@
 | `cmd/ibs` | Manager and storage node (`ibs manager`, `ibs node`, plus admin commands) |
 | `cmd/ibs-relay` | Relay |
 | `cmd/ibs-launcher` | Launcher, a separate program with its own version: what the published `ibs/launcher` image runs; installs and starts signed releases |
-| `cmd/ibs-sign` | Signs releases with an Ed25519 key, and prints a key's public half |
+| `cmd/ibs-release` | Writes a release's manifest and packs the `.ibsrelease` file (OpenSSL signs; it never sees the key) |
 | `internal/release` | Signed releases (`.ibsrelease`), the version store and trusted keys |
 | `internal/site` | Metadata, blocks, replication, peers, relays, direct connections, recovery |
 | `internal/s3api` | S3 protocol and Signature V4 |
@@ -96,20 +96,31 @@ install versions signed with a key they trust. The built-in key is the public ke
 `internal/release/keys.go`; its private half is the signing key, by default
 `~/.config/ibs/signing.key` (or `$IBS_SIGNING_KEY`).
 
-- **Once:** create the signing key with OpenSSL, then print its public key and put it
-  in `internal/release/keys.go`:
+- **Once:** create the signing key with OpenSSL, then put its public key in
+  `internal/release/keys.go`:
 
   ```bash
   openssl genpkey -algorithm ed25519 -out ~/.config/ibs/signing.key && chmod 600 ~/.config/ibs/signing.key
-  go run ./cmd/ibs-sign pubkey
+  openssl pkey -in ~/.config/ibs/signing.key -pubout | go run ./cmd/ibs-release pubkey
   ```
 
   Keep a backup of the key file somewhere safe: without it, no site will accept a new
   official release, and anyone who has it can sign one.
-- **Your own builds:** create a key the same way (e.g. `-out my.key`), then
-  `go run ./cmd/ibs-sign sign -key my.key -version 1.3.0-mine -platform linux/amd64 -o ibs.ibsrelease ibs`.
-  Add the public key (`go run ./cmd/ibs-sign pubkey -key my.key`) to a site and upload
-  the file under **Settings → Updates**.
+- **How a release is signed** (`release.sh` does this): `ibs-release manifest` describes
+  the program (version, platform, SHA-256, size, oldest compatible version, database
+  level), OpenSSL signs that manifest, and `ibs-release pack` checks the signature
+  against the built-in key and writes the `.ibsrelease` file. Only OpenSSL reads the
+  private key.
+
+  ```bash
+  go run ./cmd/ibs-release manifest -version 1.4.0 ibs >manifest.json
+  openssl pkeyutl -sign -rawin -inkey ~/.config/ibs/signing.key -in manifest.json -out manifest.sig
+  go run ./cmd/ibs-release pack -o ibs-1.4.0-linux-amd64.ibsrelease ibs manifest.json manifest.sig
+  ```
+
+- **Your own builds:** the same with a key of your own, and `-trust` with its public key
+  for `pack`. Add the public key to a site under **Settings → Updates → Release keys**,
+  then upload the file there.
 
 A release records the oldest version it can work alongside (`MinCompatible` in
 `internal/version`) and its database level (the number of migrations). Raise

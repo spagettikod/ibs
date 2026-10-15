@@ -7,8 +7,8 @@ the launcher and the relay are released separately.
 
 - **Invites are about half as long** (they start with `ibs2.`). Joining with one needs
   this version or newer; older `ibs1.` invites still work until 1.5.0.
-- Release signing keys are created with OpenSSL; `ibs-sign keygen` is gone (see
-  DEVELOPMENT.md). Existing keys keep working.
+- Releases are signed with OpenSSL; `ibs-sign` is replaced by `ibs-release`, which never
+  sees the key (see DEVELOPMENT.md).
 
 ## 1.3.3
 
