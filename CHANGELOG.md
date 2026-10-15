@@ -3,6 +3,13 @@
 Each release says what to update and which launcher and relay it works with: IBS,
 the launcher and the relay are released separately.
 
+## Unreleased
+
+- **Invites are about half as long** (they start with `ibs2.`). Joining with one needs
+  this version or newer; older `ibs1.` invites still work until 1.5.0.
+- Release signing keys are created with OpenSSL; `ibs-sign keygen` is gone (see
+  DEVELOPMENT.md). Existing keys keep working.
+
 ## 1.3.3
 
 **What to update:** sites, under **Settings → Updates**; nodes follow.

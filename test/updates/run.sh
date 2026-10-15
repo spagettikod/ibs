@@ -5,7 +5,7 @@
 #   - A installs it, restarts into it, and its storage node follows
 #   - A rolls back; untrusted releases are refused; a version that crashes on
 #     start is undone by the launcher
-# Releases are signed with a throwaway key. Needs: docker, go, curl.
+# Releases are signed with a throwaway key. Needs: docker, go, curl, openssl.
 #
 #   test/updates/run.sh
 set -u
@@ -23,8 +23,8 @@ ARCH=$(docker version --format '{{.Server.Arch}}')
 echo "building releases for linux/$ARCH"
 mkdir -p "$WORK/rel" "$WORK/gh"
 (cd "$ROOT/web" && npm run build >/dev/null 2>&1)
-go run "$ROOT/cmd/ibs-sign" keygen -key "$WORK/test.key" >/dev/null
-go run "$ROOT/cmd/ibs-sign" keygen -key "$WORK/other.key" >/dev/null
+openssl genpkey -algorithm ed25519 -out "$WORK/test.key" || exit 1
+openssl genpkey -algorithm ed25519 -out "$WORK/other.key" || exit 1
 KEY=$(cd "$ROOT" && go run ./cmd/ibs-sign pubkey -key "$WORK/test.key")
 release() { # version key file
   (cd "$ROOT" && CGO_ENABLED=0 GOOS=linux GOARCH=$ARCH go build -trimpath -ldflags "-s -w -X ibs/internal/version.Version=$1" -o "$WORK/ibs-$1" ./cmd/ibs) &&

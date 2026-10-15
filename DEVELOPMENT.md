@@ -7,7 +7,7 @@
 | `cmd/ibs` | Manager and storage node (`ibs manager`, `ibs node`, plus admin commands) |
 | `cmd/ibs-relay` | Relay |
 | `cmd/ibs-launcher` | Launcher, a separate program with its own version: what the published `ibs/launcher` image runs; installs and starts signed releases |
-| `cmd/ibs-sign` | Creates the release signing key and signs releases |
+| `cmd/ibs-sign` | Signs releases with an Ed25519 key, and prints a key's public half |
 | `internal/release` | Signed releases (`.ibsrelease`), the version store and trusted keys |
 | `internal/site` | Metadata, blocks, replication, peers, relays, direct connections, recovery |
 | `internal/s3api` | S3 protocol and Signature V4 |
@@ -96,24 +96,20 @@ install versions signed with a key they trust. The built-in key is the public ke
 `internal/release/keys.go`; its private half is the signing key, by default
 `~/.config/ibs/signing.key` (or `$IBS_SIGNING_KEY`).
 
-- **Once:** `go run ./cmd/ibs-sign keygen` creates the signing key and prints its public
-  key. Put that in `internal/release/keys.go` and keep a backup of the key file
-  somewhere safe: without it, no site will accept a new official release, and anyone
-  who has it can sign one.
-- **Your own builds:** `ibs-sign keygen -key my.key`, then
-  `ibs-sign sign -key my.key -version 1.3.0-mine -platform linux/amd64 -o ibs.ibsrelease ibs`.
-  Add the public key (`ibs-sign pubkey -key my.key`) to a site and upload the file under
-  **Settings → Updates**.
+- **Once:** create the signing key with OpenSSL, then print its public key and put it
+  in `internal/release/keys.go`:
 
-- **Rotating the key:** create a new key, add its public key to `BuiltinKeys` in
-  `internal/release/keys.go` (keep the old one) and release, signed with the old key.
-  IBS saves its built-in keys in `/data/keys` on start, so launchers already out there
-  trust the new key too. Sign later releases with the new key; release a launcher with
-  it for new installs.
-- **If the key leaks:** remove it from `BuiltinKeys`, add its ID to `RevokedKeys`, and
-  release IBS (signed with the new key) and a new launcher. Tell admins to pull the new
-  launcher: it no longer trusts the old key, and if no installed version is left that it
-  can run, it downloads the latest release.
+  ```bash
+  openssl genpkey -algorithm ed25519 -out ~/.config/ibs/signing.key && chmod 600 ~/.config/ibs/signing.key
+  go run ./cmd/ibs-sign pubkey
+  ```
+
+  Keep a backup of the key file somewhere safe: without it, no site will accept a new
+  official release, and anyone who has it can sign one.
+- **Your own builds:** create a key the same way (e.g. `-out my.key`), then
+  `go run ./cmd/ibs-sign sign -key my.key -version 1.3.0-mine -platform linux/amd64 -o ibs.ibsrelease ibs`.
+  Add the public key (`go run ./cmd/ibs-sign pubkey -key my.key`) to a site and upload
+  the file under **Settings → Updates**.
 
 A release records the oldest version it can work alongside (`MinCompatible` in
 `internal/version`) and its database level (the number of migrations). Raise

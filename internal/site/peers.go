@@ -577,16 +577,14 @@ func (s *Site) Peers() ([]PeerInfo, error) {
 
 // invite carries what a site needs to pair with the issuer: its key, a
 // one-time secret, and how to reach it. Relay tokens let the joining site
-// register with the issuer's relays.
+// register with the issuer's relays. See invite.go for how it's written.
 type invite struct {
 	Address string   `json:"a,omitempty"`
 	PubKey  string   `json:"k"`
 	Secret  string   `json:"s"`
-	Name    string   `json:"n"`
+	Name    string   `json:"n,omitempty"` // only in ibs1 invites
 	Relays  []string `json:"r,omitempty"`
 }
-
-const invitePrefix = "ibs1."
 
 // CreateInvite returns a token another site's admin pastes to pair with us.
 func (s *Site) CreateInvite() (string, error) {
@@ -595,15 +593,13 @@ func (s *Site) CreateInvite() (string, error) {
 	if addr == "" && len(relays) == 0 {
 		return "", errors.New("other sites cannot reach this site yet: add a relay or set a direct address on The Known Universe page")
 	}
-	secret := keys.RandomToken(24)
+	secret := keys.RandomToken(12) // one use within a day: 96 bits is plenty
 	now := time.Now()
 	if _, err := s.DB.Exec(`INSERT INTO invites(secret, created, expires) VALUES(?, ?, ?)`,
 		secret, now.Unix(), now.Add(inviteTTL).Unix()); err != nil {
 		return "", err
 	}
-	b, _ := json.Marshal(invite{Address: addr, PubKey: base64.RawURLEncoding.EncodeToString(s.ID.Pub), Secret: secret,
-		Name: s.Name(), Relays: relays})
-	return invitePrefix + base64.RawURLEncoding.EncodeToString(b), nil
+	return encodeInvite(invite{Address: addr, PubKey: base64.RawURLEncoding.EncodeToString(s.ID.Pub), Secret: secret, Relays: relays})
 }
 
 type pairRequest struct {
@@ -621,13 +617,12 @@ type pairResponse struct {
 
 // JoinWithInvite pairs this site with the site that issued the invite.
 func (s *Site) JoinWithInvite(ctx context.Context, token string) (*PeerInfo, error) {
-	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(strings.TrimSpace(token), invitePrefix))
-	if err != nil || !strings.HasPrefix(strings.TrimSpace(token), invitePrefix) {
-		return nil, errors.New("invite token is malformed")
+	inv, err := decodeInvite(token)
+	if err != nil {
+		return nil, err
 	}
-	var inv invite
-	if err := json.Unmarshal(raw, &inv); err != nil {
-		return nil, errors.New("invite token is malformed")
+	if inv.Name == "" {
+		inv.Name = "the inviting site"
 	}
 	pubRaw, err := base64.RawURLEncoding.DecodeString(inv.PubKey)
 	if err != nil || len(pubRaw) != ed25519.PublicKeySize {
