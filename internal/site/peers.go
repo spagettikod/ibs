@@ -26,7 +26,18 @@ import (
 const (
 	peerTimeout = 30 * time.Second
 	inviteTTL   = 24 * time.Hour
+	// peerClientTimeout caps any request to a site; each call sets its own,
+	// shorter limit (peerTimeout, or longCall for downloads like releases).
+	peerClientTimeout = 30 * time.Minute
 )
+
+type longCallKey struct{}
+
+// longCall lets peer requests made with the returned context run up to d,
+// for large transfers over slow links.
+func longCall(ctx context.Context, d time.Duration) context.Context {
+	return context.WithValue(ctx, longCallKey{}, d)
+}
 
 var errPeerStatus = errors.New("peer request failed")
 

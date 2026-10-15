@@ -96,7 +96,7 @@ export default function UpdatesSection() {
         <ErrorBox error={actionError} />
         {msg && <div className="success">{msg}</div>}
         {restarting && <div className="notice">Restarting into IBS {restarting}… This page reloads when it's back.</div>}
-        {data.versions.length === 0 ? <Empty>No versions installed yet.</Empty> : (
+        {data.versions.length + data.seen.length === 0 ? <Empty>No versions installed yet.</Empty> : (
           <table>
             <thead><tr><th>Version</th><th>Signed by</th><th>Released</th><th>Status</th><th /></tr></thead>
             <tbody>
@@ -127,19 +127,19 @@ export default function UpdatesSection() {
                   </td>
                 </tr>
               ))}
+              {data.seen.map((v) => (
+                <tr key={v.version}>
+                  <td className="mono">{v.version}<div className="muted small">Runs on {v.sites.join(', ')}</div></td>
+                  <td colSpan={3}>
+                    {!v.trusted ? <span className="small warn-text">Signed with a key this site doesn't trust (or that site doesn't share it). Add the key below, or get the version from GitHub or as a file.</span>
+                      : v.error ? <span className="small warn-text">Fetching it from {v.sites.join(', ')} failed: {v.error}. IBS tries again every minute.</span>
+                      : <span className="muted">Fetching it from {v.sites.join(', ')}…</span>}
+                  </td>
+                  <td />
+                </tr>
+              ))}
             </tbody>
           </table>
-        )}
-        {data.seen.length > 0 && (
-          <div className="stack seen">
-            {data.seen.map((s) => (
-              <p key={s.version} className="small">
-                <b>{s.version}</b> runs on {s.sites.join(', ')}.{' '}
-                {s.trusted ? 'It is signed with a key this site trusts and is being fetched from there.'
-                  : 'It is signed with a key this site doesn\'t trust (or that site doesn\'t share it). Add the key below, or get the version from GitHub or as a file.'}
-              </p>
-            ))}
-          </div>
         )}
       </Card>
 

@@ -94,8 +94,8 @@ check "and that node never tries GitHub"         bash -c "! docker logs $ID-bad 
 check "site-b joins site-a"                      bash -c "api $ID-b POST /api/peers/join \"{\\\"token\\\":\\\"\$(api $ID-a POST /api/peers/invite | sed -n 's/.*\"token\":\"\\([^\"]*\\)\".*/\\1/p')\\\"}\" | grep -q site_id"
 
 echo "Finding new versions"
-check "site-a downloads 1.9.0 from GitHub"       wait_for 90 bash -c "api $ID-a GET /api/updates | grep -q '\"version\":\"1.9.0\"'"
-check "site-b (GitHub off) gets it from site-a"  wait_for 120 bash -c "api $ID-b GET /api/updates | grep -q '\"version\":\"1.9.0\"'"
+check "site-a downloads 1.9.0 from GitHub"       wait_for 90 bash -c "api $ID-a GET /api/updates | grep -q '\"version\":\"1.9.0\",\"key_id\"'"
+check "site-b (GitHub off) gets it from site-a"  wait_for 120 bash -c "api $ID-b GET /api/updates | grep -q '\"version\":\"1.9.0\",\"key_id\"'"
 check "both say 1.9.0 is available"              bash -c "api $ID-a GET /api/updates | grep -q '\"newer\":\"1.9.0\"' && api $ID-b GET /api/updates | grep -q '\"newer\":\"1.9.0\"'"
 check "the beta is left alone by default"       bash -c "! api $ID-a GET /api/updates | grep -q '1.9.5-beta1'"
 check "nothing installs on its own"              bash -c "running $ID-a 1.8.0 && running $ID-b 1.8.0"

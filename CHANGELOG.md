@@ -3,6 +3,12 @@
 Each release says what to update and which launcher and relay it works with: IBS,
 the launcher and the relay are released separately.
 
+## Unreleased
+
+- **New versions from other sites** arrive over slow links and relays too (the
+  download gave up after 30 seconds). The Updates page lists them while they are
+  fetched, and says why when fetching fails.
+
 ## 1.5.0
 
 **What to update:** sites, under **Settings → Updates**; nodes follow. Update every

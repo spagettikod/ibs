@@ -70,8 +70,9 @@ type updateState struct {
 	githubChecked time.Time
 	githubError   string
 	githubLatest  string
-	fetching      map[string]bool // versions being fetched
-	nodeUpdate    struct {        // the one storage node currently updating
+	fetching      map[string]bool   // versions being fetched
+	fetchErrors   map[string]string // version -> why the last fetch from a site failed
+	nodeUpdate    struct {          // the one storage node currently updating
 		id    string
 		since time.Time
 	}
@@ -164,7 +165,8 @@ type VersionInfo struct {
 type SeenVersion struct {
 	Version string   `json:"version"`
 	Sites   []string `json:"sites"`
-	Trusted bool     `json:"trusted"` // signed with a key this site trusts; it will be fetched
+	Trusted bool     `json:"trusted"`         // signed with a key this site trusts; it will be fetched
+	Error   string   `json:"error,omitempty"` // why the last fetch failed
 }
 
 // KeyInfo is a trusted release key.
@@ -245,6 +247,9 @@ func (s *Site) Updates() UpdatesInfo {
 				sv.Trusted = true
 			}
 		}
+		s.updates.mu.Lock()
+		sv.Error = s.updates.fetchErrors[v]
+		s.updates.mu.Unlock()
 		info.Seen = append(info.Seen, sv)
 		if info.Newer == "" || release.Compare(v, info.Newer) > 0 {
 			info.Newer = v
@@ -390,12 +395,13 @@ func (s *Site) fetchReleases(ctx context.Context) {
 		if !s.startFetch(r.Version) {
 			continue
 		}
+		// A release is tens of megabytes: give slow links and relays time.
 		var data []byte
-		_, err := s.peerCall(ctx, pr.site, http.MethodGet, "/peer/v1/releases/"+r.Version, nil, &data)
+		_, err := s.peerCall(longCall(ctx, 20*time.Minute), pr.site, http.MethodGet, "/peer/v1/releases/"+r.Version, nil, &data)
 		if err == nil {
 			_, err = s.UploadRelease(bytes.NewReader(data))
 		}
-		s.endFetch(r.Version)
+		s.endFetch(r.Version, err)
 		if err != nil {
 			s.log.Warn("fetch release from site", "version", r.Version, "site", pr.site[:8], "err", err)
 			continue
@@ -470,10 +476,19 @@ func (s *Site) startFetch(v string) bool {
 	return true
 }
 
-func (s *Site) endFetch(v string) {
+func (s *Site) endFetch(v string, err error) {
 	s.updates.mu.Lock()
 	delete(s.updates.fetching, v)
+	if s.updates.fetchErrors == nil {
+		s.updates.fetchErrors = map[string]string{}
+	}
+	if err != nil {
+		s.updates.fetchErrors[v] = err.Error()
+	} else {
+		delete(s.updates.fetchErrors, v)
+	}
 	s.updates.mu.Unlock()
+	s.notify(TopicPeers) // the Updates page shows the new version, or why it's missing
 }
 
 // releasesURL is where the latest release is announced (overridable for tests).

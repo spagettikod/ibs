@@ -203,7 +203,7 @@ func (pc *peerClient) paths() []peerPath {
 		if pc.direct == nil {
 			if tr, err := pc.tlsConfig(); err == nil {
 				tr.DialContext = (&net.Dialer{Timeout: 4 * time.Second, KeepAlive: 30 * time.Second}).DialContext
-				pc.direct = &http.Client{Transport: tr, Timeout: 2 * time.Minute}
+				pc.direct = &http.Client{Transport: tr, Timeout: peerClientTimeout}
 			}
 		}
 		if pc.direct != nil {
@@ -241,7 +241,7 @@ func (pc *peerClient) paths() []peerPath {
 			}
 			siteID := pc.siteID
 			tr.DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) { return rc.Dial(ctx, siteID) }
-			cl = &http.Client{Transport: tr, Timeout: 2 * time.Minute}
+			cl = &http.Client{Transport: tr, Timeout: peerClientTimeout}
 			pc.viaRelay[id] = cl
 		}
 		out = append(out, peerPath{kind: PathRelay, relay: id, base: "https://peer.ibs", client: cl})
@@ -275,7 +275,11 @@ func (pc *peerClient) call(ctx context.Context, method, path string, body []byte
 	if len(paths) == 0 {
 		return nil, fmt.Errorf("no route to site %s: it shares no connected relay and has no direct address", pc.siteID[:8])
 	}
-	ctx, cancel := context.WithTimeout(ctx, peerTimeout+time.Duration(len(body)>>20)*time.Second)
+	timeout := peerTimeout + time.Duration(len(body)>>20)*time.Second
+	if d, ok := ctx.Value(longCallKey{}).(time.Duration); ok {
+		timeout = max(timeout, d)
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	var lastErr error
 	for _, p := range paths {

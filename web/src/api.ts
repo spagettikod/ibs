@@ -134,7 +134,7 @@ export type VersionInfo = {
   version: string; key_id: string; key_name: string; released: number
   current: boolean; bad: boolean; newer: boolean; beta: boolean; blocker: string; sites: string[] | null
 }
-export type SeenVersion = { version: string; sites: string[]; trusted: boolean }
+export type SeenVersion = { version: string; sites: string[]; trusted: boolean; error?: string }
 export type ReleaseKey = { id: string; name: string; key: string; default: boolean; env: boolean; signed: string[] }
 export type UpdatesInfo = {
   running: string; launcher: boolean; launcher_version?: string; github: boolean; betas: boolean; auto_install: boolean; github_checked?: number; github_error?: string
