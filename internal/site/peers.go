@@ -158,33 +158,6 @@ type SiteStatus struct {
 	Releases      []ReleaseRef `json:"releases,omitempty"`
 }
 
-// offeredStorage is what this site advertises to the IBS: all the space its
-// nodes share (their storage limits), for its own files and other sites'
-// copies alike.
-// defaultPeerShare is how much of a site's storage other sites' copies may
-// use, in percent, unless set: the rest stays free for the site's own files.
-const defaultPeerShare = 50
-
-// PeerShare is the percentage of this site's storage other sites' copies may use.
-func (s *Site) PeerShare() int {
-	if n := s.SettingInt("peer_share"); n >= 10 && n <= 100 {
-		return int(n)
-	}
-	return defaultPeerShare
-}
-
-// offeredStorage is what this site offers other sites for their copies: its
-// share of the storage (PeerShare), and how much of that is still free. Its
-// own files can use all of the storage; other sites' copies only their share,
-// so they can't crowd out the site's own files.
-func (s *Site) offeredStorage() (capacity, free int64) {
-	total, diskFree := s.siteCapacity()
-	var held int64
-	s.DB.QueryRow(`SELECT COALESCE(SUM(size), 0) FROM held_blocks`).Scan(&held)
-	capacity = total * int64(s.PeerShare()) / 100
-	return capacity, min(diskFree, max(capacity-held, 0))
-}
-
 func (s *Site) Status() SiteStatus {
 	capacity, free := s.offeredStorage()
 	st := SiteStatus{SiteID: s.ID.SiteID, Name: s.Name(), UpSince: s.started.Unix(), Capacity: capacity, Free: free}

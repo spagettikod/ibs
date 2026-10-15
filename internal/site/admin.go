@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -95,14 +94,12 @@ func (s *Site) AccessKeySecret(id string) (string, bool) {
 type Settings struct {
 	SiteName      string `json:"site_name"`
 	PeerAdvertise string `json:"peer_advertise"`
-	PeerShare     int    `json:"peer_share"` // percent of this site's storage other sites' copies may use
 }
 
 func (s *Site) Settings() Settings {
 	return Settings{
 		SiteName:      s.Name(),
 		PeerAdvertise: s.Setting("peer_advertise"),
-		PeerShare:     s.PeerShare(),
 	}
 }
 
@@ -110,16 +107,9 @@ func (s *Site) UpdateSettings(in Settings) error {
 	if strings.TrimSpace(in.SiteName) == "" {
 		return errors.New("site name is required")
 	}
-	if in.PeerShare == 0 {
-		in.PeerShare = s.PeerShare() // not sent: unchanged
-	}
-	if in.PeerShare < 10 || in.PeerShare > 100 {
-		return errors.New("other sites' copies may use between 10% and 100% of this site's storage")
-	}
 	for k, v := range map[string]string{
 		"site_name":      strings.TrimSpace(in.SiteName),
 		"peer_advertise": strings.TrimSpace(in.PeerAdvertise),
-		"peer_share":     strconv.Itoa(in.PeerShare),
 	} {
 		if err := s.SetSetting(k, v); err != nil {
 			return err
@@ -157,8 +147,7 @@ type Dashboard struct {
 		UpSince       int64     `json:"up_since"`
 		Capacity      int64     `json:"capacity"`
 		Free          int64     `json:"free"`
-		Offered       int64     `json:"offered"`       // free space offered to other sites' copies
-		OfferedTotal  int64     `json:"offered_total"` // all of it (PeerShare of the storage)
+		Offered       int64     `json:"offered"` // free space offered to other sites' copies
 		Generation    int64     `json:"generation"`
 		PeerAdvertise string    `json:"peer_advertise"`
 		WebHost       string    `json:"web_host,omitempty"` // guessed LAN host (NoteWebHost)
@@ -186,7 +175,7 @@ func (s *Site) Dashboard() (*Dashboard, error) {
 	d.Site.Name = s.Name()
 	d.Site.UpSince = s.started.Unix()
 	d.Site.Capacity, d.Site.Free = s.siteCapacity()
-	d.Site.OfferedTotal, d.Site.Offered = s.offeredStorage()
+	_, d.Site.Offered = s.offeredStorage()
 	d.Site.Generation = s.SettingInt("generation")
 	d.Site.PeerAdvertise = s.Setting("peer_advertise")
 	d.Site.WebHost = s.WebHost()

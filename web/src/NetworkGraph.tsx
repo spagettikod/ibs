@@ -44,15 +44,48 @@ function useWidth() {
   return { ref, width }
 }
 
+const relayClearance = 46 // how far a direct line stays from a relay it doesn't use
+
+/**
+ * A direct connection: a straight line, or, when that would pass a relay, a
+ * curve around it, so it never looks like it goes through the relay.
+ */
+function directPath(a: { x: number; y: number }, b: { x: number; y: number }, relays: { x: number; y: number }[]) {
+  const mx = (a.x + b.x) / 2
+  const my = (a.y + b.y) / 2
+  const dx = b.x - a.x
+  const dy = b.y - a.y
+  const len = Math.hypot(dx, dy) || 1
+  let nx = -dy / len
+  let ny = dx / len
+  // The relay closest to the line, if it's in the way.
+  let near: { x: number; y: number } | undefined
+  let nearDist = relayClearance
+  for (const r of relays) {
+    const t = Math.max(0, Math.min(1, ((r.x - a.x) * dx + (r.y - a.y) * dy) / (len * len)))
+    const d = Math.hypot(a.x + t * dx - r.x, a.y + t * dy - r.y)
+    if (d < nearDist) { near = r; nearDist = d }
+  }
+  if (!near) return { d: `M${a.x},${a.y}L${b.x},${b.y}`, lx: mx, ly: my }
+  // Bend to the side away from the relay (below it when it's right on the line).
+  let side = (near.x - mx) * nx + (near.y - my) * ny
+  if (Math.abs(side) < 1 ? ny < 0 : side > 0) { nx = -nx; ny = -ny; side = -side }
+  const k = 2 * (relayClearance + side) // side <= 0: the curve's middle ends up relayClearance from the relay
+  const qx = mx + nx * k
+  const qy = my + ny * k
+  return { d: `M${a.x},${a.y}Q${qx},${qy} ${b.x},${b.y}`, lx: mx + (nx * k) / 2, ly: my + (ny * k) / 2 }
+}
+
 function edgeClass(l: Link) {
   if (!l.online || !l.kind) return 'edge offline'
   return l.kind === 'relay' ? 'edge relayed' : 'edge direct'
 }
 
 /**
- * Map of the IBS: sites on a ring (this site on top), relays in the middle.
- * Direct connections are solid lines; relayed ones are dashed curves through
- * their relay. There are no labels: pointing at a site or relay shows its
+ * Map of the IBS: sites on a ring (this site on top, or on the left when
+ * there are two), relays in the middle. Direct connections are solid lines
+ * that bend around relays in their way; relayed ones are dashed curves
+ * through their relay. There are no labels: pointing at a site or relay shows its
  * name, and selecting a site or connection shows its details below.
  */
 export default function NetworkGraph({ selfId, selfName, selfUpSince, sites, links, relays, compact }: Props) {
@@ -81,8 +114,10 @@ export default function NetworkGraph({ selfId, selfName, selfUpSince, sites, lin
     // An ellipse that fills the box, leaving room for names below nodes.
     const rx = Math.max(Math.min(cx - 56, 300), 60)
     const ry = cy - 52
+    // Two sites side by side, more around a ring starting at the top.
+    const start = ring.length === 2 ? Math.PI : -Math.PI / 2
     ring.forEach((n, i) => {
-      const angle = -Math.PI / 2 + (2 * Math.PI * i) / Math.max(ring.length, 1)
+      const angle = start + (2 * Math.PI * i) / Math.max(ring.length, 1)
       n.x = cx + rx * Math.cos(angle)
       n.y = cy + ry * Math.sin(angle)
     })
@@ -119,9 +154,7 @@ export default function NetworkGraph({ selfId, selfName, selfUpSince, sites, lin
     const a = node(e.a)!
     const b = node(e.b)!
     const r = e.link.kind === 'relay' ? relayOf(e.link.relay) : undefined
-    if (!r) {
-      return { d: `M${a.x},${a.y}L${b.x},${b.y}`, lx: (a.x + b.x) / 2, ly: (a.y + b.y) / 2 }
-    }
+    if (!r) return directPath(a, b, relayPos)
     // Control point so the curve passes through the relay at its middle.
     const qx = 2 * r.x - (a.x + b.x) / 2
     const qy = 2 * r.y - (a.y + b.y) / 2

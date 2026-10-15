@@ -289,6 +289,7 @@ Environment variables. All are optional.
 | `IBS_RELAY_ADDRESS` | | Relay to register with on start |
 | `IBS_RELAY_TOKEN` | | Token of that relay |
 | `IBS_RELAY_TOKEN_FILE` | | Read the relay token from a file |
+| `IBS_ROOM_COOLDOWN` | `1h` | After pushing other sites' copies away for its own files, how long a site takes no new copies |
 | `IBS_RELEASES_URL` | GitHub | Where to look for new releases |
 | `IBS_S3_ADDR` | `:9000` | S3 address |
 | `IBS_S3_DOMAIN` | | Enables `bucket.domain` S3 addresses |
@@ -646,10 +647,13 @@ automatically. See [Updates](#updates).
 
 **How much space do I share with the IBS?**
 
-What your nodes' limits allow (**Nodes → Change**, or `IBS_STORAGE_LIMIT`). Your own
-files can use all of it; other sites' copies at most half, so they never crowd out your
-files (**Settings → General** changes the share). **The Known Universe** shows what each
-site shares, and the dashboard warns when a full site holds up copies.
+What your nodes' limits allow (**Nodes → Change**, or `IBS_STORAGE_LIMIT`). Other
+sites' copies may use any free space, but your own files come first: when they need
+room, your site pushes other sites' copies away. Their owners place them on another
+site first; if the IBS is full, a file may drop to two copies (the original and one
+elsewhere) until there is room again. Copies of a site that is offline are never pushed
+away. **The Known Universe** shows what each site shares, and the dashboard warns when
+the IBS is running out of space.
 
 ## Limitations
 

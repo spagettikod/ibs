@@ -73,6 +73,7 @@ test/tls/run.sh          # HTTPS certificate through DNS-01, against Pebble (a t
 test/mesh/run.sh         # one invite brings a site into the whole IBS; leaving and rejoining
 test/updates/run.sh      # updates with the launcher: GitHub, other sites, nodes, rollback
 test/scrub/run.sh        # bit rot: damaged blocks repaired on read and by a scrub
+test/room/run.sh         # a full site pushes other sites' copies away for its own files
 ```
 
 `test/tls` builds Pebble from source, since its published images may not be pullable.

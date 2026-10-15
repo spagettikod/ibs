@@ -28,7 +28,7 @@ func (s *Site) storeBlock(ctx context.Context, bucket, id string, ct []byte) err
 	if nodeID != "" && s.nodeStore(nodeID) != nil {
 		return nil
 	}
-	nodeID, err = s.putOnNode(ctx, blockstore.OwnNS, id, ct)
+	nodeID, err = s.putOwn(ctx, blockstore.OwnNS, id, ct)
 	if err != nil {
 		return err
 	}
@@ -85,7 +85,7 @@ func (s *Site) healBlock(ctx context.Context, id string, ct []byte, from string)
 	if nodeID != from || refs <= 0 {
 		return nil
 	}
-	nodeID, err := s.putOnNode(ctx, blockstore.OwnNS, id, ct)
+	nodeID, err := s.putOwn(ctx, blockstore.OwnNS, id, ct)
 	if err != nil {
 		return err
 	}

@@ -32,21 +32,21 @@ function attention(d: Dashboard, tls?: TLSStatus, updates?: UpdatesInfo, scrub?:
   if (r.missing_locally > 0) {
     out.push({ level: 'warn', text: `${r.missing_locally} blocks are being restored to this site from other sites`, href: '#/nodes', link: 'Nodes' })
   }
-  if (d.site.capacity > 0 && d.site.free < d.site.capacity * 0.05) {
-    out.push({ level: 'bad', text: `Storage is almost full: ${fmtBytes(d.site.free)} free`, href: '#/nodes', link: 'Nodes' })
+  // Other sites' copies make way for this site's own files, so they count as room.
+  const room = d.site.free + d.site.held_bytes
+  if (d.site.capacity > 0 && room < d.site.capacity * 0.05) {
+    out.push({ level: 'bad', text: `Storage is almost full: ${fmtBytes(room)} left for this site's files`, href: '#/nodes', link: 'Nodes' })
   }
   for (const rl of d.relays ?? []) {
     if (!rl.connected) out.push({ level: 'warn', text: `Relay ${rl.name} is not connected`, href: '#/network', link: 'The Known Universe' })
   }
   for (const p of d.peers ?? []) {
     if (!p.online) out.push({ level: 'warn', text: `Site ${p.name} is offline (seen ${ago(p.last_seen)})`, href: '#/network', link: 'The Known Universe' })
-    // A site with no room left for copies holds up the IBS: copies wait for it.
-    else if (r.under_replicated > 0 && p.free < 4 << 20) out.push({ level: 'warn', text: `Site ${p.name} has no room left for copies, so ${r.under_replicated} blocks can't get all their copies`, href: '#/network', link: 'The Known Universe' })
   }
   if (c.sites > 0 && c.sites < c.copies) {
     out.push({ level: 'warn', text: `Files have ${c.sites} of ${c.copies} copies on other sites: only ${c.sites} other ${c.sites === 1 ? 'site is' : 'sites are'} online`, href: '#/network', link: 'The Known Universe' })
-  } else if (!c.fits) {
-    out.push({ level: 'warn', text: `Not enough space on other sites for all copies (${fmtBytes(c.needed)} to copy)`, href: '#/buckets', link: 'Buckets' })
+  } else if (r.no_room > 0 || (!c.fits && r.under_replicated > 0)) {
+    out.push({ level: 'warn', text: `The IBS is running out of space: ${r.under_replicated} blocks have fewer copies on other sites than they should. They get them back when there is room.`, href: '#/network', link: 'The Known Universe' })
   } else if (r.under_replicated > 0) {
     out.push({ level: 'info', text: `${r.under_replicated} blocks are being copied to other sites`, href: '#/buckets', link: 'Buckets' })
   }

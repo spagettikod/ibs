@@ -71,6 +71,8 @@ type Site struct {
 	links   map[string]Link // learned from other sites
 	updates updateState
 	scrub   scrubState
+	roomMu  sync.Mutex   // one makeRoom at a time
+	noRoom  atomic.Int64 // blocks no site had room for at the last replication run
 }
 
 // IsSetUp reports whether the data directory holds an initialized site.

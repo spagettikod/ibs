@@ -3,6 +3,15 @@
 Each release says what to update and which launcher and relay it works with: IBS,
 the launcher and the relay are released separately.
 
+## Unreleased
+
+- **No share setting:** other sites' copies may use all free space. When your own files
+  need room, your site pushes other sites' copies away: their owners place them
+  elsewhere first, or keep two copies of the file. Copies of offline sites stay. The
+  owner's dashboard says when the IBS is running out of space; the missing copies come
+  back when there is room. Sites on 1.4.0 keep their copies until they update.
+- **The network diagram** draws direct connections around relays, not through them.
+
 ## 1.4.0
 
 **What to update:** sites, under **Settings → Updates**; nodes follow. Relays: pull

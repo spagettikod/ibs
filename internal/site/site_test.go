@@ -21,7 +21,7 @@ import (
 
 func newTestSite(t *testing.T) *Site {
 	t.Helper()
-	cfg := config.Config{DataDir: t.TempDir(), PeerGrace: time.Minute, CheckInterval: time.Second}
+	cfg := config.Config{DataDir: t.TempDir(), PeerGrace: time.Minute, CheckInterval: time.Second, RoomCooldown: time.Hour}
 	s, phrase, err := Create(cfg, "test", "password123")
 	if err != nil {
 		t.Fatal(err)
@@ -387,7 +387,7 @@ func TestNodeLimitFromWebInterface(t *testing.T) {
 }
 
 func TestEveryFileHasTwoCopiesElsewhere(t *testing.T) {
-	cfg := config.Config{DataDir: t.TempDir(), PeerGrace: time.Minute, CheckInterval: time.Second}
+	cfg := config.Config{DataDir: t.TempDir(), PeerGrace: time.Minute, CheckInterval: time.Second, RoomCooldown: time.Hour}
 	s, _, err := Create(cfg, "test", "password123")
 	if err != nil {
 		t.Fatal(err)
@@ -447,32 +447,70 @@ func TestNodeQuotaConcurrentWrites(t *testing.T) {
 	}
 }
 
-// Other sites' copies may only use their share of a site's storage, so the
-// site's own files always keep room.
-func TestPeerShare(t *testing.T) {
+// Other sites' copies may use all free space but a small margin, and none
+// for a while after the site had to make room for its own files.
+func TestOfferedStorage(t *testing.T) {
 	s := newTestSite(t)
 	ctx := context.Background()
-	s.cfg.StorageLimit = 10 << 20
+	s.cfg.StorageLimit = 100 << 20
 	s.refreshLocalNode(ctx)
-	if s.PeerShare() != defaultPeerShare {
-		t.Fatalf("default share %d", s.PeerShare())
-	}
 	capacity, free := s.offeredStorage()
-	if capacity != 5<<20 || free != 5<<20 {
-		t.Fatalf("offered %d, %d free; want 5 MiB of 10", capacity, free)
+	if capacity != 100<<20 || free != 95<<20 {
+		t.Fatalf("offered %d, %d free; want 95 MiB of 100", capacity, free)
 	}
-	// 4 MiB of copies kept for another site: 1 MiB of the share is left.
-	s.DB.Exec(`INSERT INTO held_blocks(owner, id, size, node_id, stored, verified) VALUES('peer', 'x', ?, ?, 0, 0)`, 4<<20, LocalNodeID)
-	if _, free := s.offeredStorage(); free != 1<<20 {
-		t.Fatalf("free share %d, want 1 MiB", free)
+	s.SetSetting("room_made_at", itoa(time.Now().Unix()))
+	if _, free := s.offeredStorage(); free != 0 {
+		t.Fatalf("offered %d right after making room", free)
 	}
-	if err := s.UpdateSettings(Settings{SiteName: "test", PeerShare: 100}); err != nil {
+}
+
+// A site gives back an owner's copy only when the block keeps its original
+// and a copy on another online site.
+func TestReleaseCopies(t *testing.T) {
+	s := newTestSite(t)
+	ctx := context.Background()
+	s.CreateBucket("room")
+	data := make([]byte, 3*blockcodec.BlockSize)
+	rand.Read(data)
+	if _, err := s.PutObject(ctx, "room", "f", bytes.NewReader(data), "", nil); err != nil {
 		t.Fatal(err)
 	}
-	if capacity, _ := s.offeredStorage(); capacity != 10<<20 {
-		t.Fatalf("100%%: offered %d", capacity)
+	var ids []string
+	rows, _ := s.DB.Query(`SELECT id FROM blocks ORDER BY id`)
+	for rows.Next() {
+		var id string
+		rows.Scan(&id)
+		ids = append(ids, id)
 	}
-	if s.UpdateSettings(Settings{SiteName: "test", PeerShare: 5}) == nil {
-		t.Fatal("accepted a share below 10%")
+	rows.Close()
+	if len(ids) != 3 {
+		t.Fatalf("%d blocks", len(ids))
+	}
+	now := time.Now().Unix()
+	for _, p := range []struct {
+		id     string
+		online int
+	}{{"holder-site", 1}, {"other-site", 1}, {"away-site", 0}} {
+		s.DB.Exec(`INSERT INTO peers(site_id, name, pubkey, address, added, last_seen, online, free) VALUES(?, ?, x'', '', ?, ?, ?, 0)`,
+			p.id, p.id, now, now, p.online)
+	}
+	// Block 0: also on an online site. Block 1: also on an offline one. Block 2: only on the holder.
+	for _, r := range [][2]string{{ids[0], "holder-site"}, {ids[0], "other-site"}, {ids[1], "holder-site"}, {ids[1], "away-site"}, {ids[2], "holder-site"}} {
+		s.DB.Exec(`INSERT INTO replicas(block_id, site_id, state, verified) VALUES(?, ?, 'ok', ?)`, r[0], r[1], now)
+	}
+	got := s.releaseCopies(ctx, "holder-site", append(ids, "gone"), 1<<40)
+	if len(got) != 2 || got[0] != ids[0] || got[1] != "gone" {
+		t.Fatalf("released %v; want the block with another online copy and the unknown one", got)
+	}
+	var st string
+	s.DB.QueryRow(`SELECT state FROM replicas WHERE block_id = ? AND site_id = 'holder-site'`, ids[0]).Scan(&st)
+	if st != "delete" {
+		t.Fatalf("released copy is %q", st)
+	}
+	// It stops once enough is released.
+	s.DB.Exec(`UPDATE replicas SET state = 'ok'`)
+	s.DB.Exec(`INSERT INTO replicas(block_id, site_id, state, verified) VALUES(?, 'other-site', 'ok', ?)`, ids[2], now)
+	if got := s.releaseCopies(ctx, "holder-site", ids, 1); len(got) != 1 {
+		t.Fatalf("released %d for 1 byte", len(got))
 	}
 }

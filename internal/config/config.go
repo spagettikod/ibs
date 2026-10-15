@@ -33,6 +33,7 @@ type Config struct {
 	TLSRequire      bool   // refuse plain HTTP once the certificate is in place
 
 	PeerGrace     time.Duration // offline time before a peer's replicas stop counting
+	RoomCooldown  time.Duration // after making room for its own files, how long a site takes no copies
 	CheckInterval time.Duration // peer health / replication loop interval
 
 	QUICAddr       string // manager: UDP address for direct site-to-site connections
@@ -85,6 +86,7 @@ func Load() (Config, error) {
 		TLSDNSWait:      env("IBS_TLS_DNS_PROPAGATION_WAIT", ""),
 		TLSRequire:      env("IBS_TLS_REQUIRE", "true") != "false",
 		PeerGrace:       dur("IBS_PEER_GRACE", 30*time.Minute),
+		RoomCooldown:    dur("IBS_ROOM_COOLDOWN", time.Hour),
 		CheckInterval:   dur("IBS_CHECK_INTERVAL", 5*time.Second),
 		QUICAddr:        env("IBS_QUIC_ADDR", ":7443"),
 		RelayAddress:    env("IBS_RELAY_ADDRESS", ""),

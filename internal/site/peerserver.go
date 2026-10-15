@@ -64,6 +64,7 @@ func (s *Site) peerHandler() http.Handler {
 	mux.HandleFunc("PUT /peer/v1/blocks/{id}", paired(s.handlePutHeld))
 	mux.HandleFunc("GET /peer/v1/blocks/{id}", paired(s.handleGetHeld))
 	mux.HandleFunc("POST /peer/v1/blocks/delete", paired(s.handleDeleteHeld))
+	mux.HandleFunc("POST /peer/v1/blocks/release", paired(s.handleRelease))
 	mux.HandleFunc("GET /peer/v1/inventory", paired(s.handleInventory))
 	mux.HandleFunc("PUT /peer/v1/backup", paired(s.handlePutBackup))
 	mux.HandleFunc("GET /peer/v1/backup", s.handleGetBackup) // also used by an unpaired restore client

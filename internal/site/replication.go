@@ -56,6 +56,7 @@ func (s *Site) replicateOnce(ctx context.Context) {
 	}
 	rows.Close()
 	if len(needs) == 0 {
+		s.noRoom.Store(0)
 		return
 	}
 
@@ -64,7 +65,7 @@ func (s *Site) replicateOnce(ctx context.Context) {
 		return
 	}
 	full := map[string]bool{}
-	copied := 0
+	copied, noRoom := 0, int64(0)
 	for _, nd := range needs {
 		if ctx.Err() != nil {
 			return
@@ -81,15 +82,22 @@ func (s *Site) replicateOnce(ctx context.Context) {
 		}
 		hr.Close()
 		var targets []string
+		anyFull := false
 		for _, p := range peers {
 			if len(targets) == nd.missing {
 				break
+			}
+			if !have[p.siteID] && full[p.siteID] {
+				anyFull = true
 			}
 			if !have[p.siteID] && !full[p.siteID] {
 				targets = append(targets, p.siteID)
 			}
 		}
 		if len(targets) == 0 {
+			if anyFull {
+				noRoom++
+			}
 			continue
 		}
 		ct, err := s.readBlock(ctx, nd.id)
@@ -97,10 +105,12 @@ func (s *Site) replicateOnce(ctx context.Context) {
 			s.log.Warn("cannot read block for replication", "block", nd.id[:12], "err", err)
 			continue
 		}
+		placed, refused := 0, 0
 		for _, sid := range targets {
 			err := s.peerPutBlock(ctx, sid, nd.id, ct)
 			if isStatus(err, http.StatusInsufficientStorage) {
 				full[sid] = true
+				refused++
 				continue
 			}
 			if err != nil {
@@ -111,8 +121,13 @@ func (s *Site) replicateOnce(ctx context.Context) {
 				ON CONFLICT(block_id, site_id) DO UPDATE SET state = 'ok', verified = excluded.verified`,
 				nd.id, sid, time.Now().Unix())
 			copied++
+			placed++
+		}
+		if refused > 0 && placed < nd.missing {
+			noRoom++
 		}
 	}
+	s.noRoom.Store(noRoom)
 	if copied > 0 {
 		s.notify(TopicReplication)
 		s.log.Info("replicated blocks", "copies", copied)
@@ -578,10 +593,12 @@ type ReplicationHealth struct {
 	PendingBytes    int64 `json:"pending_bytes"` // replica bytes still to be copied
 	MissingLocally  int64 `json:"missing_locally"`
 	PendingDeletes  int64 `json:"pending_deletes"`
+	// NoRoom: blocks that need a copy no site has room for, at the last try.
+	NoRoom int64 `json:"no_room"`
 }
 
 func (s *Site) ReplicationHealth() ReplicationHealth {
-	var h ReplicationHealth
+	h := ReplicationHealth{NoRoom: s.noRoom.Load()}
 	countedSince := time.Now().Add(-s.cfg.PeerGrace).Unix()
 	s.DB.QueryRow(`SELECT COUNT(*), COALESCE(SUM(size), 0) FROM blocks WHERE refs > 0`).Scan(&h.Blocks, &h.Bytes)
 	s.DB.QueryRow(`SELECT COUNT(*) FROM blocks WHERE refs > 0 AND node_id = ''`).Scan(&h.MissingLocally)

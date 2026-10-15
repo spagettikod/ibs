@@ -29,6 +29,7 @@ suites=(
   "aws-cli:test/s3/aws-cli.sh"
   "rclone:test/s3/rclone.sh"
   "scrub:test/scrub/run.sh"
+  "room:test/room/run.sh"
 )
 JOBS=${JOBS:-3}
 echo "== suites ($JOBS at a time, logs in $LOGS)"

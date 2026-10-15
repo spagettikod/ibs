@@ -73,20 +73,6 @@ function SiteSettings({ section }: { section: 'general' }) {
           {section === 'general' && (
             <label>Site name<input value={form.site_name} onChange={(e) => setForm({ ...form, site_name: e.target.value })} /></label>
           )}
-          {section === 'general' && (
-            <label>
-              Space for other sites' copies
-              <select value={form.peer_share} onChange={(e) => setForm({ ...form, peer_share: Number(e.target.value) })}>
-                {[25, 50, 75, 100].concat([25, 50, 75, 100].includes(form.peer_share) ? [] : [form.peer_share]).map((p) => (
-                  <option key={p} value={p}>{p}% of this site's storage{p === 50 ? ' (default)' : ''}</option>
-                ))}
-              </select>
-              <small className="muted">
-                The copies this site keeps for other sites may use at most this much. The rest stays free for this site's own
-                files, which can use all of the storage.
-              </small>
-            </label>
-          )}
           <ErrorBox error={saveError} />
           {msg && <div className="success">{msg}</div>}
           <button className="btn primary">Save</button>
