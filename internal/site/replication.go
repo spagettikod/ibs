@@ -626,6 +626,12 @@ type ReplicationHealth struct {
 	PendingDeletes  int64 `json:"pending_deletes"`
 	// NoRoom: blocks that need a copy no site has room for, at the last try.
 	NoRoom int64 `json:"no_room"`
+	// Copies made on other sites, of those the sites there are can take
+	// (fewer than wanted when there are fewer sites than copies), and the
+	// blocks still missing one of those.
+	CopiesMade     int64 `json:"copies_made"`
+	CopiesPossible int64 `json:"copies_possible"`
+	Copying        int64 `json:"copying"`
 }
 
 func (s *Site) ReplicationHealth() ReplicationHealth {
@@ -646,6 +652,14 @@ func (s *Site) ReplicationHealth() ReplicationHealth {
 					WHERE r.block_id = b.id AND r.state = 'ok' AND p.online = 1) AS n
 			FROM blocks b JOIN buckets bk ON bk.name = b.bucket WHERE b.refs > 0)
 		WHERE n > replication`).Scan(&h.OverReplicated)
+	var sites int64
+	s.DB.QueryRow(`SELECT COUNT(*) FROM peers WHERE last_seen >= ?`, countedSince).Scan(&sites)
+	s.DB.QueryRow(`SELECT COALESCE(SUM(min(n, want)), 0), COALESCE(SUM(want), 0), COUNT(CASE WHEN n < want THEN 1 END) FROM (
+			SELECT min(bk.replication, ?) AS want,
+				(SELECT COUNT(*) FROM replicas r JOIN peers p ON p.site_id = r.site_id
+					WHERE r.block_id = b.id AND r.state = 'ok' AND p.last_seen >= ?) AS n
+			FROM blocks b JOIN buckets bk ON bk.name = b.bucket WHERE b.refs > 0)`, sites, countedSince).
+		Scan(&h.CopiesMade, &h.CopiesPossible, &h.Copying)
 	return h
 }
 

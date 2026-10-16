@@ -77,7 +77,7 @@ export type Dashboard = {
   }
   replication: {
     blocks: number; bytes: number; under_replicated: number; over_replicated: number
-    pending_bytes: number; missing_locally: number; pending_deletes: number; no_room: number
+    pending_bytes: number; missing_locally: number; pending_deletes: number; no_room: number; copies_made: number; copies_possible: number; copying: number
   }
   ibs_capacity: IBSCapacity
   nodes: NodeInfo[]

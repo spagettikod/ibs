@@ -557,3 +557,24 @@ func TestReplicationBatches(t *testing.T) {
 		t.Fatalf("batch %d, want only the 44 blocks the other site doesn't hold", n)
 	}
 }
+
+// With one other site, each block can have one copy elsewhere: progress counts
+// those, not the second copy that needs another site.
+func TestCopyProgress(t *testing.T) {
+	s := newTestSite(t)
+	ctx := context.Background()
+	s.CreateBucket("progress")
+	for i := range 3 {
+		data := make([]byte, 1000)
+		rand.Read(data)
+		s.PutObject(ctx, "progress", fmt.Sprint(i), bytes.NewReader(data), "", nil)
+	}
+	now := time.Now().Unix()
+	s.DB.Exec(`INSERT INTO peers(site_id, name, pubkey, address, added, last_seen, online) VALUES('only-peer', 'only-peer', x'', '', ?, ?, 1)`, now, now)
+	s.DB.Exec(`INSERT INTO replicas(block_id, site_id, state, verified) SELECT id, 'only-peer', 'ok', ? FROM blocks ORDER BY id LIMIT 1`, now)
+	h := s.ReplicationHealth()
+	if h.CopiesMade != 1 || h.CopiesPossible != 3 || h.Copying != 2 || h.UnderReplicated != 3 {
+		t.Fatalf("made %d of %d possible, %d copying, %d under-replicated; want 1 of 3, 2, 3",
+			h.CopiesMade, h.CopiesPossible, h.Copying, h.UnderReplicated)
+	}
+}

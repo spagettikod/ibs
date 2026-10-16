@@ -101,8 +101,9 @@ export default function DashboardPage() {
   const network = data.network ?? []
   const used = site.capacity - site.free
   const online = network.filter((n) => n.online).length + 1
-  const copying = true // every file is copied to other sites
-  const copied = r.blocks === 0 ? 100 : Math.floor((100 * (r.blocks - r.under_replicated)) / r.blocks)
+  // Of the copies the other sites can take now: with fewer sites than copies,
+  // the rest wait for another site (the health list says so).
+  const copied = r.copies_possible === 0 ? 100 : Math.floor((100 * r.copies_made) / r.copies_possible)
 
   return (
     <div className="page">
@@ -119,9 +120,11 @@ export default function DashboardPage() {
       <div className="tiles">
         <Stat label="Your files" value={fmtBytes(site.object_bytes)}
           sub={`${site.objects} ${site.objects === 1 ? 'object' : 'objects'} in ${site.buckets} ${site.buckets === 1 ? 'bucket' : 'buckets'}`} />
-        <Stat label="Copied to other sites" value={copying ? `${copied}%` : 'Not used'}
-          tone={!copying ? undefined : copied === 100 ? 'ok' : 'warn'}
-          sub={!copying ? 'No bucket keeps copies on other sites' : r.under_replicated > 0 ? `${r.under_replicated} blocks waiting` : 'All copies in place'} />
+        <Stat label="Copied to other sites" value={`${copied}%`}
+          tone={r.under_replicated === 0 ? 'ok' : 'warn'}
+          sub={r.copying > 0 ? `${r.copying.toLocaleString()} blocks being copied`
+            : r.under_replicated > 0 ? `${r.under_replicated.toLocaleString()} blocks wait for another site`
+            : 'All copies in place'} />
         <Stat label="Storage" value={`${fmtBytes(site.free)} free`}
           sub={<><Meter used={used} total={site.capacity} />{fmtBytes(used)} of {fmtBytes(site.capacity)} used
             {site.held_bytes > 0 ? `, ${fmtBytes(site.held_bytes)} of it other sites' copies` : ''}</>} />

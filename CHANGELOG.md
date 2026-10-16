@@ -3,6 +3,11 @@
 Each release says what to update and which launcher and relay it works with: IBS,
 the launcher and the relay are released separately.
 
+## Unreleased
+
+- **Copied to other sites** on the dashboard shows progress also when there are fewer
+  sites than copies, and how many blocks are being copied.
+
 ## 1.5.2
 
 **What to update:** sites, under **Settings → Updates**; nodes follow. Relays spread
