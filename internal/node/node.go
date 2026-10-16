@@ -128,9 +128,6 @@ func Run(ctx context.Context, cfg config.Config, tokenArg string) error {
 			}
 			addr := manager
 			if addr == "" {
-				addr = t.Address
-			}
-			if addr == "" {
 				addr = st.Manager
 			}
 			if addr == "" {

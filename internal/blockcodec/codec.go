@@ -2,9 +2,7 @@
 //
 // Every block gets a random GCM nonce, stored at its start, so no two blocks
 // are alike, even of identical data: each file owns its blocks (IBS doesn't
-// deduplicate; the tool that writes backups into it does). Blocks written
-// before 1.6.0 used a nonce derived from the data; they decrypt the same way.
-// A block's ID is the SHA-256 of its ciphertext, which lets any copy be
+// deduplicate; the tool that writes backups into it does). A block's ID is the SHA-256 of its ciphertext, which lets any copy be
 // verified without the key.
 package blockcodec
 

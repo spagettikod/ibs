@@ -158,15 +158,14 @@ function Outcome({ e }: { e: ScrubError }) {
 }
 
 function CopiesCard() {
-  const { data, error, reload } = useLoader(() => api<CopyCheck[]>('GET', '/api/scrub/copies'), [], 300000)
+  const { data, error } = useLoader(() => api<CopyCheck[]>('GET', '/api/scrub/copies'), ['scrub', 'replication'])
   return (
-    <Card title="Your copies on other sites" actions={<button className="btn small" onClick={reload}>Refresh</button>}>
+    <Card title="Your copies on other sites">
       <p className="muted small">
-        This site's scrub checks its copies on other sites too. A site on an older version checks them itself in its own
-        scrub.
+        This site's scrub checks its copies on other sites too: they must prove they hold the exact same bytes.
       </p>
       <ErrorBox error={error} />
-      {!data ? <p className="muted">Asking the other sites…</p> : data.length === 0 ? <Empty>No copies on other sites yet.</Empty> : (
+      {!data ? null : data.length === 0 ? <Empty>No copies on other sites yet.</Empty> : (
         <table>
           <thead><tr><th>Site</th><th className="num">Copies</th><th>Last checked</th><th>Result</th></tr></thead>
           <tbody>
@@ -174,23 +173,10 @@ function CopiesCard() {
               <tr key={c.site_id}>
                 <td>{c.name}</td>
                 <td className="num">{c.copies.toLocaleString()}</td>
-                {c.own ? (
-                  <>
-                    <td>{ago(c.own.scrubbed)}<div className="muted small">by this site's scrub</div></td>
-                    <td>{c.own.bad > 0
-                      ? <span className="warn-text">{c.own.bad} missing or damaged, copied again from this site</span>
-                      : `${c.own.checked.toLocaleString()} checked, all identical`}</td>
-                  </>
-                ) : (
-                  <>
-                    <td>{c.error ? <span className="muted">{c.error}</span> : c.scrubbed ? ago(c.scrubbed) : 'not yet'}
-                      {!c.error && c.scrubbed > 0 && <div className="muted small">by its own scrub</div>}
-                      {c.running && <div className="muted small">a scrub is running</div>}</td>
-                    <td>{c.error || !c.scrubbed ? '—' : c.damaged > 0
-                      ? <span className="warn-text">{c.damaged} damaged, replaced from this site</span>
-                      : `${c.checked.toLocaleString()} checked, all intact`}</td>
-                  </>
-                )}
+                <td>{c.scrubbed ? ago(c.scrubbed) : <span className="muted">not yet</span>}</td>
+                <td>{!c.scrubbed ? '—' : c.bad > 0
+                  ? <span className="warn-text">{c.bad.toLocaleString()} missing or damaged, copied again from this site</span>
+                  : `${c.checked.toLocaleString()} checked, all identical`}</td>
               </tr>
             ))}
           </tbody>

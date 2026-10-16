@@ -91,9 +91,6 @@ func TestScrub(t *testing.T) {
 	if n != 0 {
 		t.Fatal("the damaged held block is still recorded")
 	}
-	if r := s.heldReport(owner); r.Checked != 1 || r.Damaged != 1 || r.Scrubbed == 0 {
-		t.Fatalf("report for the other site: %+v", r)
-	}
 
 	// Reading the file fails instead of returning damaged data.
 	if _, err := s.readBlock(ctx, o.Blocks[0].ID); err == nil {
@@ -170,7 +167,7 @@ func TestCopyChallenge(t *testing.T) {
 		s.DB.Exec(`INSERT INTO replicas(block_id, site_id, state, verified) VALUES(?, ?, 'ok', ?)`, id, peer, now)
 	}
 	s.StartScrub(true)
-	r := &scrubRun{s: s, id: s.currentScrub().ID, unreachable: map[string]bool{}, skipped: map[string]bool{}, legacy: map[string]bool{}}
+	r := &scrubRun{s: s, id: s.currentScrub().ID, unreachable: map[string]bool{}, skipped: map[string]bool{}}
 	local := map[string]string{ids[0]: "right", ids[1]: "right"}
 	results := make(chan copyCheckResult, 1)
 	results <- copyCheckResult{site: peer, ids: ids, reply: copyCheckReply{

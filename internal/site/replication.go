@@ -18,9 +18,9 @@ import (
 )
 
 const (
-	staleUpload      = time.Hour // unfinished multipart uploads with nothing arriving for this long are removed
-	replicateBatch   = 256       // blocks looked up at a time
-	replicateWorkers = 4         // blocks copied at the same time
+	staleUpload      = 10 * time.Minute // unfinished multipart uploads with nothing arriving for this long are removed
+	replicateBatch   = 256              // blocks looked up at a time
+	replicateWorkers = 4                // blocks copied at the same time
 )
 
 type peerCandidate struct {
@@ -73,8 +73,10 @@ func (s *Site) replicationNeeds(ctx context.Context) ([]replNeed, error) {
 
 // replicateOnce brings blocks up to their bucket's replication count by
 // copying them to online peers with the most free space. Replicas on peers
-// that have been unreachable longer than the grace period do not count, so
-// their blocks are re-replicated elsewhere. Blocks every online site already
+// that have been unreachable longer than the grace period (IBS_PEER_GRACE, 2
+// minutes) do not count, so their blocks are re-created elsewhere, like a RAID
+// rebuild: at most IBS_REBUILD_RATE, so it doesn't take the whole line. When
+// the site comes back, the surplus copies are trimmed (trimOnce). Blocks every online site already
 // holds wait for another site to come online.
 //
 // Up to replicateWorkers blocks are copied at the same time, so a link with a
@@ -175,6 +177,10 @@ func (s *Site) replicateBlock(ctx context.Context, nd replNeed, peers []peerCand
 		s.log.Warn("cannot read block for replication", "block", nd.id[:12], "err", err)
 		return 0, false
 	}
+	if len(have) > 0 {
+		// A copy exists on a site that's gone: this is a rebuild.
+		s.rebuildLimit.wait(ctx, int64(len(ct)*len(targets)), s.cfg.RebuildRate)
+	}
 	placed, refused := 0, 0
 	for _, sid := range targets {
 		err := s.peerPutBlock(ctx, sid, nd.id, ct)
@@ -263,7 +269,7 @@ func (s *Site) onlinePeers() []peerCandidate {
 
 // collectGarbage deletes blocks no file or multipart part uses any more, and
 // that no upload in progress is writing, here and on other sites: at once,
-// like a disk. Unfinished multipart uploads that got nothing for an hour are
+// like a disk. Unfinished multipart uploads that got nothing for 10 minutes are
 // removed first.
 func (s *Site) collectGarbage(ctx context.Context) {
 	s.removeStaleUploads()
@@ -348,7 +354,7 @@ const lostNodesSQL = `SELECT id FROM nodes WHERE is_local = 0 AND last_seen < ?`
 // they come back with it. Blocks held for other sites on a lost node are
 // dropped; their owners re-replicate them.
 func (s *Site) healOnce(ctx context.Context) {
-	lostCutoff := time.Now().Add(-s.cfg.PeerGrace).Unix()
+	lostCutoff := time.Now().Add(-s.cfg.NodeGrace).Unix()
 	s.DB.Exec(`UPDATE blocks SET node_id = '' WHERE node_id != '' AND node_id NOT IN (SELECT id FROM nodes)`)
 	if res, err := s.DB.Exec(`DELETE FROM held_blocks WHERE node_id IN (`+lostNodesSQL+`)`, lostCutoff); err == nil {
 		if n, _ := res.RowsAffected(); n > 0 {

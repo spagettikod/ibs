@@ -77,8 +77,8 @@ api $ID-a POST /api/scrub/start >/dev/null
 check "site-a's scrub finishes"                wait_for 60 scrub_done $ID-a
 check "it checked the copies on site-b and site-c" bash -c "api $ID-a GET /api/scrub | grep -q '\"last\":{[^}]*\"copies\":[1-9]'"
 check "it finds the damaged copy on site-b"    bash -c "api $ID-a GET /api/scrub | grep -q '\"what\":\"remote\",\"block_id\":\"[0-9a-f]*\",\"place\":\"site-b\",\"problem\":\"damaged\",\"outcome\":\"replaced\"'"
-check "and shows it under copies on other sites" bash -c "api $ID-a GET /api/scrub/copies | grep -q '\"name\":\"site-b\",\"copies\":[0-9]*,\"own\":{[^}]*\"bad\":1'"
-check "site-c's copies all passed the challenge" bash -c "api $ID-a GET /api/scrub/copies | grep -q '\"name\":\"site-c\",\"copies\":[0-9]*,\"own\":{[^}]*\"bad\":0'"
+check "and shows it under copies on other sites" bash -c "api $ID-a GET /api/scrub/copies | grep -q '\"name\":\"site-b\",\"copies\":[0-9]*,\"scrubbed\":[1-9][0-9]*,\"checked\":[0-9]*,\"bad\":1'"
+check "site-c's copies all passed the challenge" bash -c "api $ID-a GET /api/scrub/copies | grep -q '\"name\":\"site-c\",\"copies\":[0-9]*,\"scrubbed\":[1-9][0-9]*,\"checked\":[1-9][0-9]*,\"bad\":0'"
 check "site-b gets a new copy"                 wait_for 60 bash -c "held_by $ID-b && api $ID-a GET /api/dashboard | grep -q '\"under_replicated\":0'"
 check "site-b's own scrub leaves fresh copies to their owner" bash -c "api $ID-b POST /api/scrub/start >/dev/null; sleep 1; api $ID-b GET /api/scrub | grep -q '\"total\":0'"
 

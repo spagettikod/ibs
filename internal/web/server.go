@@ -294,7 +294,7 @@ func (s *Server) routes() {
 		return writeJSON(w, st.ScrubStatus())
 	}))
 	m.HandleFunc("GET /api/scrub/copies", a(func(w http.ResponseWriter, r *http.Request, st *site.Site) error {
-		return writeJSON(w, nonNil(st.CopyChecks(r.Context())))
+		return writeJSON(w, nonNil(st.CopyChecks()))
 	}))
 	for action, f := range map[string]func(*site.Site) error{
 		"start":  func(st *site.Site) error { return st.StartScrub(true) },

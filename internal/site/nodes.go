@@ -260,7 +260,7 @@ func (s *Site) Nodes() ([]NodeInfo, error) {
 	}
 	defer rows.Close()
 	cutoff := time.Now().Add(-nodeTimeout).Unix()
-	lostCutoff := time.Now().Add(-s.cfg.PeerGrace).Unix()
+	lostCutoff := time.Now().Add(-s.cfg.NodeGrace).Unix()
 	var out []NodeInfo
 	for rows.Next() {
 		var n NodeInfo

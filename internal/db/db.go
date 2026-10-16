@@ -54,10 +54,9 @@ CREATE TABLE IF NOT EXISTS objects (
 	PRIMARY KEY (bucket, key)
 );
 
--- Blocks owned by this site. refs counts objects and multipart parts using
--- the block (1 for blocks written since 1.6.0, which aren't shared; more for
--- older, deduplicated ones). node_id is the local node holding it ('' when
--- missing locally).
+-- Blocks owned by this site. Each belongs to one file or multipart part (refs
+-- 1; 0 when unused: deleted, unless an upload in progress owns it). node_id is
+-- the local node holding it ('' when missing locally).
 CREATE TABLE IF NOT EXISTS blocks (
 	id      TEXT PRIMARY KEY,
 	bucket  TEXT NOT NULL,
@@ -221,16 +220,6 @@ CREATE TABLE IF NOT EXISTS scrub_errors (
 	detail   TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS scrub_errors_scrub ON scrub_errors(scrub_id);
-
--- Per site: how the copies this site keeps for it did in a scrub, which that
--- site asks for to show how its copies are.
-CREATE TABLE IF NOT EXISTS scrub_held (
-	scrub_id INTEGER NOT NULL,
-	owner    TEXT NOT NULL,
-	checked  INTEGER NOT NULL DEFAULT 0,
-	damaged  INTEGER NOT NULL DEFAULT 0,
-	PRIMARY KEY (scrub_id, owner)
-);
 
 -- Per site: how the copies of this site's blocks there did in this site's
 -- scrub (checked; bad: missing, damaged or failing the challenge).

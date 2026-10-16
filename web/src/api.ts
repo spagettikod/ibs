@@ -154,7 +154,4 @@ export type ScrubInfo = {
   current: Scrub | null; last: Scrub | null; history: Scrub[]; errors: ScrubError[]
   interval_days: number; next_due?: number; unresolved: number
 }
-export type CopyCheck = {
-  site_id: string; name: string; copies: number; scrubbed: number; checked: number; damaged: number; running: boolean; error?: string
-  own?: { scrubbed: number; checked: number; bad: number }
-}
+export type CopyCheck = { site_id: string; name: string; copies: number; scrubbed: number; checked: number; bad: number }

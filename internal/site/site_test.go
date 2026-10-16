@@ -23,7 +23,7 @@ import (
 
 func newTestSite(t *testing.T) *Site {
 	t.Helper()
-	cfg := config.Config{DataDir: t.TempDir(), PeerGrace: time.Minute, CheckInterval: time.Second, RoomCooldown: time.Hour}
+	cfg := config.Config{DataDir: t.TempDir(), PeerGrace: time.Minute, NodeGrace: time.Minute, CheckInterval: time.Second, RoomCooldown: time.Hour, RebuildRate: 1 << 30}
 	s, phrase, err := Create(cfg, "test", "password123")
 	if err != nil {
 		t.Fatal(err)
@@ -511,7 +511,7 @@ func TestNodeLimitFromWebInterface(t *testing.T) {
 }
 
 func TestEveryFileHasTwoCopiesElsewhere(t *testing.T) {
-	cfg := config.Config{DataDir: t.TempDir(), PeerGrace: time.Minute, CheckInterval: time.Second, RoomCooldown: time.Hour}
+	cfg := config.Config{DataDir: t.TempDir(), PeerGrace: time.Minute, NodeGrace: time.Minute, CheckInterval: time.Second, RoomCooldown: time.Hour, RebuildRate: 1 << 30}
 	s, _, err := Create(cfg, "test", "password123")
 	if err != nil {
 		t.Fatal(err)

@@ -284,11 +284,13 @@ Environment variables. All are optional.
 | `IBS_NODE_JOIN_ADDRESS` | page address | Manager address shown in the node command |
 | `IBS_PEER_ADDR` | `:7443` | TCP address for nodes and sites |
 | `IBS_PEER_ADVERTISE` | | Direct address other sites can use (LAN/VPN) |
-| `IBS_PEER_GRACE` | `30m` | Offline time before a site's or node's copies are re-created |
+| `IBS_NODE_GRACE` | `30m` | Offline time before a storage node counts as lost and its blocks are restored |
+| `IBS_PEER_GRACE` | `2m` | Offline time before the copies on a site are re-created on other sites |
 | `IBS_PROBATION` | `2m` | How long a new version must run before it counts as working |
 | `IBS_QUIC_ADDR` | `:7443` | UDP address for direct connections |
 | `IBS_RELAY_ADDRESS` | | Relay to register with on start |
 | `IBS_RELAY_TOKEN` | | Token of that relay |
+| `IBS_REBUILD_RATE` | `20M` | How fast copies of an offline site are re-created, per second |
 | `IBS_RELAY_TOKEN_FILE` | | Read the relay token from a file |
 | `IBS_ROOM_COOLDOWN` | `1h` | After pushing other sites' copies away for its own files, how long a site takes no new copies |
 | `IBS_RELEASES_URL` | GitHub | Where to look for new releases |
@@ -387,7 +389,7 @@ Click a situation to expand it. The commands assume the container names from
 <details><summary><b>A storage node is offline or its disk failed</b></summary>
 
 Nothing to do right away. Reads of its blocks are served from other sites. After 30
-minutes (`IBS_PEER_GRACE`), its blocks are copied from other sites onto your other
+minutes (`IBS_NODE_GRACE`), its blocks are copied from other sites onto your other
 nodes. Blocks not copied to other sites yet exist only on that node: the **Nodes**
 page shows how many.
 
@@ -533,10 +535,11 @@ Files that weren't copied to other sites yet are lost with the site.
 
 </details>
 
-<details><summary><b>Another site has been offline for a long time</b></summary>
+<details><summary><b>Another site is offline</b></summary>
 
-After 30 minutes, the copies it held of your data are made on other sites, if there are
-enough. When it returns, the surplus copies are removed.
+New files get their copies on the sites that are online. After 2 minutes, the copies the
+offline site held of your data are made again on other sites, if there are enough, at
+most 20 MB/s (`IBS_REBUILD_RATE`). When it returns, the surplus copies are removed.
 
 </details>
 

@@ -874,7 +874,7 @@ func (s *Site) removeStaleUploads() {
 		busy := s.activeUploads[u.id] > 0
 		s.activeMu.Unlock()
 		if !busy && s.AbortUpload(u.bucket, u.key, u.id) == nil {
-			s.log.Info("removed an unfinished upload: nothing arrived for an hour", "bucket", u.bucket, "key", u.key)
+			s.log.Info("removed an unfinished upload: nothing arrived for 10 minutes", "bucket", u.bucket, "key", u.key)
 		}
 	}
 }

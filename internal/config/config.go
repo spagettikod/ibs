@@ -32,7 +32,9 @@ type Config struct {
 	TLSDNSWait      string // wait instead of checking that TXT records are visible, e.g. "2m"
 	TLSRequire      bool   // refuse plain HTTP once the certificate is in place
 
-	PeerGrace     time.Duration // offline time before a peer's replicas stop counting
+	PeerGrace     time.Duration // offline time before a peer's replicas stop counting (they're re-created elsewhere)
+	NodeGrace     time.Duration // offline time before a storage node counts as lost (its blocks are restored)
+	RebuildRate   int64         // bytes per second for re-creating copies of an unreachable site
 	RoomCooldown  time.Duration // after making room for its own files, how long a site takes no copies
 	CheckInterval time.Duration // peer health / replication loop interval
 
@@ -67,8 +69,13 @@ func Load() (Config, error) {
 	if rawLimit != "" && limit == 0 {
 		limit = NoStorage // an explicit 0: this node stores no blocks
 	}
+	rebuild, err := ParseSize(env("IBS_REBUILD_RATE", "20M"))
+	if err != nil || rebuild <= 0 {
+		return Config{}, fmt.Errorf("IBS_REBUILD_RATE: give a rate like 20M (per second)")
+	}
 	return Config{
 		StorageLimit:    limit,
+		RebuildRate:     rebuild,
 		Mode:            env("IBS_MODE", "manager"),
 		DataDir:         env("IBS_DATA", "/data"),
 		WebAddr:         env("IBS_WEB_ADDR", ":8080"),
@@ -85,7 +92,8 @@ func Load() (Config, error) {
 		TLSDNSResolvers: list("IBS_TLS_DNS_RESOLVERS"),
 		TLSDNSWait:      env("IBS_TLS_DNS_PROPAGATION_WAIT", ""),
 		TLSRequire:      env("IBS_TLS_REQUIRE", "true") != "false",
-		PeerGrace:       dur("IBS_PEER_GRACE", 30*time.Minute),
+		PeerGrace:       dur("IBS_PEER_GRACE", 2*time.Minute),
+		NodeGrace:       dur("IBS_NODE_GRACE", 30*time.Minute),
 		RoomCooldown:    dur("IBS_ROOM_COOLDOWN", time.Hour),
 		CheckInterval:   dur("IBS_CHECK_INTERVAL", 5*time.Second),
 		QUICAddr:        env("IBS_QUIC_ADDR", ":7443"),

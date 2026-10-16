@@ -39,9 +39,6 @@ func ChallengeAnswer(nonce, data []byte) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// ErrNoVerify means the node is too old to check blocks itself.
-var ErrNoVerify = errors.New("node can't check blocks itself")
-
 // Verifier checks stored blocks where they are, so a scrub doesn't move every
 // block over the network: a block's id is the SHA-256 of its content, so no
 // key is needed. With a nonce, intact blocks also answer that challenge.
@@ -76,8 +73,7 @@ func (s *FS) Verify(ctx context.Context, ns string, ids []string, nonce []byte) 
 	return res, nil
 }
 
-// Verify on a storage node. The nonce goes in the query, so a node too old to
-// answer challenges still checks the blocks and just returns no answers.
+// Verify on a storage node; the nonce goes in the query.
 func (r *Remote) Verify(ctx context.Context, ns string, ids []string, nonce []byte) (VerifyResult, error) {
 	var res VerifyResult
 	body, _ := json.Marshal(ids)
@@ -90,9 +86,6 @@ func (r *Remote) Verify(ctx context.Context, ns string, ids []string, nonce []by
 		return res, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed {
-		return res, ErrNoVerify
-	}
 	if err := expect(resp, http.StatusOK); err != nil {
 		return res, err
 	}

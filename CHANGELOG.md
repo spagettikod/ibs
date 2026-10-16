@@ -13,7 +13,12 @@ the launcher and the relay are released separately.
   random nonce), copies included: your backup tool deduplicates already. Deleted or
   overwritten data is removed here and on the other sites within seconds instead of
   after 10 minutes. Unfinished multipart uploads are removed when nothing has arrived
-  for them for an hour.
+  for them for 10 minutes.
+- **A site offline for 2 minutes (was 30) gets its copies re-created elsewhere**, at
+  most 20 MB/s (`IBS_REBUILD_RATE`), like a RAID rebuild. Storage nodes keep 30 minutes,
+  now set with `IBS_NODE_GRACE`.
+- Code for older versions is gone: old node join tokens (`ibsn1.`), sites' own reports
+  on copies they keep for others, and storage nodes that can't check blocks themselves.
 - **A scrub checks your copies on other sites too.** Each batch of your blocks is
   checked here and, at the same time, on the sites holding copies. They must answer a
   fresh challenge that only the exact same bytes answer, so your site compares the

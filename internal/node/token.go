@@ -10,23 +10,17 @@ import (
 	"strings"
 )
 
-const (
-	tokenPrefix  = "ibsn2." // key + secret; the manager address is given separately (IBS_MANAGER)
-	legacyPrefix = "ibsn1." // address + key + secret (older tokens)
-)
+const tokenPrefix = "ibsn2." // key + secret; the manager address is given separately (IBS_MANAGER)
 
 // Token carries what a node needs to join a site and never needs changing:
 // the manager's key (pinned for all traffic) and the join secret. The
-// manager's address is a separate, visible setting (IBS_MANAGER); only older
-// tokens include it.
+// manager's address is a separate, visible setting (IBS_MANAGER).
 type Token struct {
-	Address string            // manager's TLS listener, host:port (older tokens only)
-	Key     ed25519.PublicKey // manager's (site) key
-	Secret  string
+	Key    ed25519.PublicKey // manager's (site) key
+	Secret string
 }
 
 type tokenJSON struct {
-	A string `json:"a,omitempty"`
 	K string `json:"k"`
 	S string `json:"s"`
 }
@@ -39,13 +33,8 @@ func (t Token) Encode() string {
 func ParseToken(s string) (Token, error) {
 	s = strings.TrimSpace(s)
 	bad := errors.New("join token is malformed")
-	var body string
-	switch {
-	case strings.HasPrefix(s, tokenPrefix):
-		body = strings.TrimPrefix(s, tokenPrefix)
-	case strings.HasPrefix(s, legacyPrefix):
-		body = strings.TrimPrefix(s, legacyPrefix)
-	default:
+	body, ok := strings.CutPrefix(s, tokenPrefix)
+	if !ok {
 		return Token{}, bad
 	}
 	raw, err := base64.RawURLEncoding.DecodeString(body)
@@ -60,7 +49,7 @@ func ParseToken(s string) (Token, error) {
 	if err != nil || len(key) != ed25519.PublicKeySize || tj.S == "" {
 		return Token{}, bad
 	}
-	return Token{Address: tj.A, Key: key, Secret: tj.S}, nil
+	return Token{Key: key, Secret: tj.S}, nil
 }
 
 // Registration is what a node sends the manager on start and as heartbeat.

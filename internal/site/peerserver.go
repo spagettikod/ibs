@@ -56,7 +56,6 @@ func (s *Site) peerHandler() http.Handler {
 	mux.HandleFunc("POST /peer/v1/pair", s.handlePair)
 	mux.HandleFunc("POST /cluster/v1/register", s.handleNodeRegister)
 	mux.HandleFunc("POST /peer/v1/leave", paired(s.handleLeave))
-	mux.HandleFunc("DELETE /peer/v1/pair", paired(s.handleLeave)) // what 1.0.0 sends when it disconnects
 	mux.HandleFunc("GET /peer/v1/status", paired(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, s.Status())
 	}))
@@ -70,9 +69,6 @@ func (s *Site) peerHandler() http.Handler {
 	mux.HandleFunc("GET /peer/v1/backup", s.handleGetBackup) // also used by an unpaired restore client
 	mux.HandleFunc("GET /peer/v1/releases/{version}", paired(s.handleGetRelease))
 	mux.HandleFunc("POST /peer/v1/scrub/check", paired(s.handleCopyCheck))
-	mux.HandleFunc("GET /peer/v1/scrub", paired(func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, s.heldReport(callerOf(r).siteID))
-	}))
 	mux.HandleFunc("GET /cluster/v1/release", s.handleNodeRelease)
 	mux.HandleFunc("GET /cluster/v1/releases/{version}", func(w http.ResponseWriter, r *http.Request) {
 		if !s.isNodeKey(callerOf(r).pub) {

@@ -209,9 +209,6 @@ func (r *scrubRun) checkCopies(ctx context.Context, ids []string, nonce []byte) 
 			r.siteSkipped(site, "it was offline, so its copies of this site's blocks weren't checked")
 			continue
 		}
-		if r.legacy[site] {
-			continue
-		}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -228,7 +225,7 @@ func (r *scrubRun) checkCopies(ctx context.Context, ids []string, nonce []byte) 
 				for try := 0; try < 2; try++ {
 					reply = copyCheckReply{}
 					_, err = s.peerCall(ctx, site, http.MethodPost, "/peer/v1/scrub/check", body, &reply)
-					if err == nil || isStatus(err, http.StatusNotFound) || ctx.Err() != nil {
+					if err == nil || ctx.Err() != nil {
 						break
 					}
 				}
@@ -257,10 +254,7 @@ func (r *scrubRun) compareCopies(ctx context.Context, results <-chan copyCheckRe
 	for res := range results {
 		name := s.peerName(res.site)
 		if res.err != nil {
-			if isStatus(res.err, http.StatusNotFound) {
-				r.legacy[res.site] = true
-				r.siteSkipped(res.site, "it runs an older version that checks the copies itself; see Your copies on other sites")
-			} else if ctx.Err() == nil {
+			if ctx.Err() == nil {
 				r.siteSkipped(res.site, "it couldn't be reached, so its copies of this site's blocks weren't checked: "+res.err.Error())
 			}
 			continue
@@ -280,9 +274,9 @@ func (r *scrubRun) compareCopies(ctx context.Context, results <-chan copyCheckRe
 		}
 		var wrong []string
 		for id, answer := range res.reply.Answers {
-			// No answer to compare (an older node, or this site's copy was
-			// just repaired): the copy matched its checksum there.
-			if mine, ok := local[id]; ok && answer != "" && answer != mine {
+			// Without an answer here (this site's copy was damaged and just
+			// repaired) the copy there counts as checked by its checksum.
+			if mine, ok := local[id]; ok && answer != mine {
 				wrong = append(wrong, id)
 			}
 		}

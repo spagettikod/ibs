@@ -36,9 +36,6 @@ func FetchRelease(ctx context.Context, cfg config.Config, tokenArg string) (rele
 			return release.Bundle{}, nil, err
 		}
 		key, secret = t.Key, t.Secret
-		if addr == "" {
-			addr = t.Address
-		}
 	}
 	if addr == "" {
 		addr = st.Manager
@@ -69,9 +66,6 @@ func FetchRelease(ctx context.Context, cfg config.Config, tokenArg string) (rele
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		if strings.TrimSpace(string(msg)) == "404 page not found" {
-			return release.Bundle{}, nil, fmt.Errorf("manager %s runs an IBS version that can't give nodes IBS; update it to 1.3.0 or newer", addr)
-		}
 		return release.Bundle{}, nil, fmt.Errorf("manager %s: %s", addr, strings.TrimSpace(string(msg)))
 	}
 	b, err := release.ReadTar(resp.Body)
