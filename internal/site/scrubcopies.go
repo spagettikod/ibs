@@ -19,14 +19,19 @@ import (
 // word for it. Missing, damaged and mismatching copies are dropped and copied
 // again from this site.
 //
-// The site holding the copies reads them at its own scrub rate, whoever asks.
+// The site holding the copies reads them at its own scrub rate, whoever asks,
+// and only about copyCheckWork worth per request: it answers what it got
+// through and hands back the rest, or says when to come back if it's busy.
+// So every request ends within seconds, and a site that doesn't answer is
+// found out within peerTimeout.
 // It still checks copies itself that their owner hasn't checked for a while
 // (heldSelfCheckAfter), e.g. of a site that has been offline for long.
 
-const (
-	heldSelfCheckAfter = 60 * 24 * time.Hour
-	copyCheckTimeout   = 5 * time.Minute // per request of scrubBatch blocks
-)
+const heldSelfCheckAfter = 60 * 24 * time.Hour
+
+// copyCheckWork is how much reading one copy check request does, at the
+// scrub rate. A variable for tests.
+var copyCheckWork = 10 * time.Second
 
 // byteLimiter keeps reads to a rate across everything that reads for scrubs.
 type byteLimiter struct {
@@ -34,17 +39,29 @@ type byteLimiter struct {
 	next time.Time
 }
 
-// wait returns when n more bytes fit in the rate.
-func (l *byteLimiter) wait(ctx context.Context, n, rate int64) {
+// backlog is how long reads already allowed take to fit in the rate.
+func (l *byteLimiter) backlog() time.Duration {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return max(time.Until(l.next), 0)
+}
+
+// reserve counts n bytes against the rate and returns when they fit.
+func (l *byteLimiter) reserve(n, rate int64) time.Time {
 	d := time.Duration(float64(n) / float64(rate) * float64(time.Second))
 	l.mu.Lock()
+	defer l.mu.Unlock()
 	now := time.Now()
 	if l.next.Before(now) {
 		l.next = now
 	}
 	l.next = l.next.Add(d)
-	until := l.next
-	l.mu.Unlock()
+	return l.next
+}
+
+// wait returns when n more bytes fit in the rate.
+func (l *byteLimiter) wait(ctx context.Context, n, rate int64) {
+	until := l.reserve(n, rate)
 	select {
 	case <-ctx.Done():
 	case <-time.After(time.Until(until)):
@@ -61,6 +78,8 @@ type copyCheckReply struct {
 	Damaged   []string          `json:"damaged"`   // didn't match their id; dropped
 	Missing   []string          `json:"missing"`   // not here
 	Unchecked []string          `json:"unchecked"` // on a node that couldn't be reached
+	Later     []string          `json:"later"`     // not got to in this request: ask again
+	Wait      float64           `json:"wait"`      // seconds to wait before asking again (busy)
 	Bytes     int64             `json:"bytes"`
 }
 
@@ -77,14 +96,27 @@ func (s *Site) handleCopyCheck(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Site) checkHeld(ctx context.Context, owner string, ids []string, nonce []byte) copyCheckReply {
-	reply := copyCheckReply{Answers: map[string]string{}, Damaged: []string{}, Missing: []string{}, Unchecked: []string{}}
+	reply := copyCheckReply{Answers: map[string]string{}, Damaged: []string{}, Missing: []string{}, Unchecked: []string{}, Later: []string{}}
+	rate := scrubRate()
+	if b := s.scrubLimit.backlog(); b > copyCheckWork {
+		reply.Later, reply.Wait = ids, (b - copyCheckWork).Seconds()
+		return reply // busy with other scrubs: come back later
+	}
+	budget := int64(copyCheckWork.Seconds() * float64(rate))
 	byNode := map[string][]string{}
-	for _, id := range ids {
+	var planned int64
+	for i, id := range ids {
 		var node string
-		if s.DB.QueryRow(`SELECT node_id FROM held_blocks WHERE owner = ? AND id = ?`, owner, id).Scan(&node) != nil {
+		var size int64
+		if s.DB.QueryRow(`SELECT node_id, size FROM held_blocks WHERE owner = ? AND id = ?`, owner, id).Scan(&node, &size) != nil {
 			reply.Missing = append(reply.Missing, id)
 			continue
 		}
+		if planned > 0 && planned+size > budget {
+			reply.Later = ids[i:]
+			break
+		}
+		planned += size
 		byNode[node] = append(byNode[node], id)
 	}
 	now := time.Now().Unix()
@@ -128,7 +160,13 @@ func (s *Site) checkHeld(ctx context.Context, owner string, ids []string, nonce 
 		s.log.Warn("copies kept for another site failed its scrub check; dropped", "owner", s.peerName(owner), "damaged", len(reply.Damaged), "missing", len(reply.Missing))
 		s.notify(TopicReplication)
 	}
-	s.scrubLimit.wait(ctx, reply.Bytes, scrubRate())
+	// Count the reads against the rate, but don't keep the caller waiting long:
+	// a backlog makes the next request come back later instead.
+	s.scrubLimit.reserve(reply.Bytes, rate)
+	select {
+	case <-ctx.Done():
+	case <-time.After(min(s.scrubLimit.backlog(), copyCheckWork)):
+	}
 	return reply
 }
 
@@ -177,16 +215,19 @@ func (r *scrubRun) checkCopies(ctx context.Context, ids []string, nonce []byte) 
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			// A few blocks per request, each with a time limit and one retry,
-			// so a connection that hangs costs minutes, not the scrub.
-			for i := 0; i < len(list); i += scrubBatch {
-				chunk := list[i:min(i+scrubBatch, len(list))]
+			// A batch at a time; the other site checks what fits in a few
+			// seconds and hands back the rest. A request that fails is tried
+			// once more, then the site counts as unreachable for this batch.
+			queue := list
+			for len(queue) > 0 && ctx.Err() == nil {
+				chunk := queue[:min(scrubBatch, len(queue))]
+				queue = queue[len(chunk):]
 				body, _ := json.Marshal(copyCheckRequest{Nonce: nonce, IDs: chunk})
 				var reply copyCheckReply
 				var err error
 				for try := 0; try < 2; try++ {
 					reply = copyCheckReply{}
-					_, err = s.peerCall(longCall(ctx, copyCheckTimeout), site, http.MethodPost, "/peer/v1/scrub/check", body, &reply)
+					_, err = s.peerCall(ctx, site, http.MethodPost, "/peer/v1/scrub/check", body, &reply)
 					if err == nil || isStatus(err, http.StatusNotFound) || ctx.Err() != nil {
 						break
 					}
@@ -194,6 +235,13 @@ func (r *scrubRun) checkCopies(ctx context.Context, ids []string, nonce []byte) 
 				out <- copyCheckResult{site, chunk, reply, err}
 				if err != nil {
 					return
+				}
+				if len(reply.Later) > 0 {
+					queue = append(append([]string{}, reply.Later...), queue...)
+					select {
+					case <-ctx.Done():
+					case <-time.After(time.Duration(reply.Wait * float64(time.Second))):
+					}
 				}
 			}
 		}()

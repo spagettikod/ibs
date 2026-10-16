@@ -31,7 +31,7 @@ import (
 
 const (
 	roomBatch       = 16 * blockcodec.BlockSize // freed at least, so not every block of an upload asks again
-	replaceDeadline = 20 * time.Second
+	replaceDeadline = 10 * time.Second          // the owner answers well within peerTimeout
 )
 
 // heldMargin is space kept free for this site's own files: other sites'
@@ -98,9 +98,7 @@ func (s *Site) makeRoom(ctx context.Context, need int64) bool {
 		}
 		body, _ := json.Marshal(releaseRequest{IDs: ids, Bytes: target - freed})
 		var resp releaseResponse
-		cctx, cancel := context.WithTimeout(ctx, time.Minute)
-		_, err := s.peerCall(cctx, owner, http.MethodPost, "/peer/v1/blocks/release", body, &resp)
-		cancel()
+		_, err := s.peerCall(ctx, owner, http.MethodPost, "/peer/v1/blocks/release", body, &resp)
 		if err != nil {
 			s.log.Warn("ask a site to release copies", "peer", owner[:8], "err", err)
 			continue
@@ -189,6 +187,9 @@ func (s *Site) handleRelease(w http.ResponseWriter, r *http.Request) {
 
 func (s *Site) releaseCopies(ctx context.Context, holder string, ids []string, bytes int64) []string {
 	deadline := time.Now().Add(replaceDeadline)
+	// Replacements stop at the deadline, also one in progress.
+	rctx, cancel := context.WithDeadline(ctx, deadline)
+	defer cancel()
 	full := map[string]bool{holder: true}
 	var released []string
 	var freed int64
@@ -209,7 +210,7 @@ func (s *Site) releaseCopies(ctx context.Context, holder string, ids []string, b
 			continue // the holder's copy may be what restores ours
 		}
 		others := s.otherCopies(id, holder)
-		if time.Now().Before(deadline) && s.placeReplacement(ctx, id, full) {
+		if time.Now().Before(deadline) && s.placeReplacement(rctx, id, full) {
 			others++
 			replaced++
 		} else if others >= 1 {

@@ -121,7 +121,7 @@ func (s *Site) reclaimCodes(rc *relay.Client) {
 // relay for invite code number.
 func (s *Site) answerCode(conn net.Conn, number string) {
 	defer conn.Close()
-	conn.SetDeadline(time.Now().Add(time.Minute))
+	conn.SetDeadline(time.Now().Add(peerTimeout))
 	var words, invite string
 	err := s.DB.QueryRow(`SELECT words, invite FROM invite_codes WHERE number = ? AND used = 0 AND expires > ?`, number, time.Now().Unix()).
 		Scan(&words, &invite)
@@ -178,7 +178,7 @@ func (s *Site) JoinWithCode(ctx context.Context, code string) (*PeerInfo, error)
 // fetchInvite is the joining site's side of the exchange: it proves it knows
 // the words and gets the full invite.
 func fetchInvite(conn net.Conn, number, words string) (string, error) {
-	conn.SetDeadline(time.Now().Add(time.Minute))
+	conn.SetDeadline(time.Now().Add(peerTimeout))
 	msgA, st, err := cpace.Start(number+"-"+words, cpaceContext)
 	if err != nil {
 		return "", err

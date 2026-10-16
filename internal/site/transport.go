@@ -275,14 +275,19 @@ func (pc *peerClient) call(ctx context.Context, method, path string, body []byte
 	if len(paths) == 0 {
 		return nil, fmt.Errorf("no route to site %s: it shares no connected relay and has no direct address", pc.siteID[:8])
 	}
-	timeout := peerTimeout + time.Duration(len(body)>>20)*time.Second
-	if d, ok := ctx.Value(longCallKey{}).(time.Duration); ok {
-		timeout = max(timeout, d)
+	var cancel context.CancelFunc
+	if ctx.Value(streamingKey{}) != nil {
+		// A download: no limit while data keeps coming.
+		ctx, _, cancel = withStall(ctx)
+	} else {
+		ctx, cancel = context.WithTimeout(ctx, peerTimeout+time.Duration(len(body)>>20)*time.Second)
 	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	var lastErr error
 	for _, p := range paths {
+		if w, ok := ctx.Value(stallWatchKey{}).(*stallWatch); ok {
+			w.touch() // each path gets the full time to start
+		}
 		start := time.Now()
 		hdr, n, err := pc.s.roundTrip(ctx, p, method, path, body, out)
 		var pe *PeerError
@@ -302,6 +307,9 @@ func (pc *peerClient) call(ctx context.Context, method, path string, body []byte
 		if ctx.Err() != nil {
 			break
 		}
+	}
+	if errors.Is(context.Cause(ctx), errStalled) {
+		return nil, errStalled
 	}
 	return nil, lastErr
 }
@@ -340,6 +348,47 @@ func (pc *peerClient) record(p peerPath, method, path string, d time.Duration, n
 }
 
 // roundTrip performs one request on one path and returns the bytes received.
+var errStalled = errors.New("no data arrived for a while (stallTimeout); the other side stopped sending")
+
+type stallWatchKey struct{}
+
+// withStall returns a context that is cancelled (cause errStalled) when the
+// stallWatch isn't touched for stallTimeout; wrap response bodies in a
+// touchReader so that arriving data touches it.
+func withStall(ctx context.Context) (context.Context, *stallWatch, context.CancelFunc) {
+	ctx, stop := context.WithCancelCause(ctx)
+	w := &stallWatch{t: time.AfterFunc(stallTimeout, func() { stop(errStalled) })}
+	ctx = context.WithValue(ctx, stallWatchKey{}, w)
+	return ctx, w, func() { w.t.Stop(); stop(nil) }
+}
+
+// stalled reports err as errStalled when that is why ctx ended.
+func stalled(ctx context.Context, err error) error {
+	if err != nil && errors.Is(context.Cause(ctx), errStalled) {
+		return errStalled
+	}
+	return err
+}
+
+// stallWatch cancels a streaming request when no data arrived for stallTimeout.
+type stallWatch struct{ t *time.Timer }
+
+func (w *stallWatch) touch() { w.t.Reset(stallTimeout) }
+
+// touchReader resets the stall watch whenever data arrives.
+type touchReader struct {
+	r io.Reader
+	w *stallWatch
+}
+
+func (t touchReader) Read(p []byte) (int, error) {
+	n, err := t.r.Read(p)
+	if n > 0 {
+		t.w.touch()
+	}
+	return n, err
+}
+
 func (s *Site) roundTrip(ctx context.Context, p peerPath, method, path string, body []byte, out any) (http.Header, int64, error) {
 	var rd io.Reader
 	if body != nil {
@@ -357,19 +406,24 @@ func (s *Site) roundTrip(ctx context.Context, p peerPath, method, path string, b
 		return nil, 0, err
 	}
 	defer resp.Body.Close()
+	var rb io.Reader = resp.Body
+	if w, ok := ctx.Value(stallWatchKey{}).(*stallWatch); ok {
+		w.touch()
+		rb = touchReader{resp.Body, w}
+	}
 	if resp.StatusCode >= 300 {
-		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		msg, _ := io.ReadAll(io.LimitReader(rb, 512))
 		return resp.Header, 0, &PeerError{resp.StatusCode, strings.TrimSpace(string(msg))}
 	}
 	var n int64
 	switch o := out.(type) {
 	case nil:
-		n, err = io.Copy(io.Discard, resp.Body)
+		n, err = io.Copy(io.Discard, rb)
 	case *[]byte:
-		*o, err = io.ReadAll(resp.Body)
+		*o, err = io.ReadAll(rb)
 		n = int64(len(*o))
 	default:
-		cr := &countingReader{r: resp.Body}
+		cr := &countingReader{r: rb}
 		err = json.NewDecoder(cr).Decode(out)
 		n = cr.n
 	}

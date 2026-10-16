@@ -198,3 +198,39 @@ func TestCopyChallenge(t *testing.T) {
 		t.Fatalf("scrub counts %d copies, %d repaired", sc.Copies, sc.Repaired)
 	}
 }
+
+// A copy check request does a bounded amount of reading: what doesn't fit is
+// handed back, and a busy site says when to come back.
+func TestCopyCheckBounded(t *testing.T) {
+	t.Setenv("IBS_SCRUB_RATE", "64K")
+	old := copyCheckWork
+	copyCheckWork = time.Second // 64 KiB per request
+	defer func() { copyCheckWork = old }()
+	holder := newTestSite(t)
+	ctx := context.Background()
+	fsys := holder.nodeStore(LocalNodeID).(*blockstore.FS)
+	owner := strings.Repeat("cd", 16)
+	var ids []string
+	for i := range 3 {
+		id, ct := blockcodec.Encrypt(keys.RandomKey(), bytes.Repeat([]byte{byte(i)}, 40<<10))
+		fsys.Put(ctx, owner, id, ct)
+		holder.DB.Exec(`INSERT INTO held_blocks(owner, id, size, node_id, stored, verified) VALUES(?, ?, ?, ?, ?, 0)`,
+			owner, id, len(ct), LocalNodeID, time.Now().Unix())
+		ids = append(ids, id)
+	}
+	start := time.Now()
+	reply := holder.checkHeld(ctx, owner, ids, newNonce())
+	if len(reply.Answers) != 1 || len(reply.Later) != 2 {
+		t.Fatalf("%d answered, %d later; want 1 and 2 (40 KiB blocks, 64 KiB per request)", len(reply.Answers), len(reply.Later))
+	}
+	if d := time.Since(start); d > 2*time.Second {
+		t.Fatalf("the request took %v", d)
+	}
+	// Busy with a lot of reading already: come back later, at once.
+	holder.scrubLimit.reserve(1<<20, 64<<10)
+	start = time.Now()
+	reply = holder.checkHeld(ctx, owner, ids, newNonce())
+	if len(reply.Answers) != 0 || len(reply.Later) != 3 || reply.Wait < 5 || time.Since(start) > time.Second {
+		t.Fatalf("busy: %d answered, %d later, wait %.1fs, took %v", len(reply.Answers), len(reply.Later), reply.Wait, time.Since(start))
+	}
+}

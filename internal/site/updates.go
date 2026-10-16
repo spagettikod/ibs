@@ -444,9 +444,9 @@ func (s *Site) fetchReleases(ctx context.Context) {
 		if !s.startFetch(r.Version) {
 			continue
 		}
-		// A release is tens of megabytes: give slow links and relays time.
+		// A release is tens of megabytes: it may take as long as data keeps coming.
 		var data []byte
-		_, err := s.peerCall(longCall(ctx, 20*time.Minute), pr.site, http.MethodGet, "/peer/v1/releases/"+r.Version, nil, &data)
+		_, err := s.peerCall(streaming(ctx), pr.site, http.MethodGet, "/peer/v1/releases/"+r.Version, nil, &data)
 		if err == nil {
 			_, err = s.UploadRelease(bytes.NewReader(data))
 		}
@@ -551,14 +551,16 @@ func (s *Site) CheckGitHubNow(ctx context.Context) {
 // checkGitHub looks at the latest release on GitHub and downloads it when it
 // is newer than what this site holds.
 func (s *Site) checkGitHub(ctx context.Context) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	// No total time limit: the download fails when no data arrived for
+	// stallTimeout, so a slow line still gets there and a dead one fails fast.
+	ctx, watch, cancel := withStall(ctx)
 	defer cancel()
 	err := func() error {
 		resp, err := httpGet(ctx, release.ReleasesURL())
 		if err != nil {
 			return err
 		}
-		body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+		body, err := io.ReadAll(io.LimitReader(touchReader{resp.Body, watch}, 8<<20))
 		resp.Body.Close()
 		if err != nil {
 			return err
@@ -587,13 +589,14 @@ func (s *Site) checkGitHub(ctx context.Context) {
 			return err
 		}
 		defer resp.Body.Close()
-		in, err := s.UploadRelease(resp.Body)
+		in, err := s.UploadRelease(touchReader{resp.Body, watch})
 		if err != nil {
 			return err
 		}
 		s.log.Info("downloaded release from GitHub", "version", in.Version)
 		return nil
 	}()
+	err = stalled(ctx, err)
 	s.updates.mu.Lock()
 	s.updates.githubChecked = time.Now()
 	s.updates.githubError = ""

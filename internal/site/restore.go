@@ -273,26 +273,30 @@ func writeDB(path string, raw []byte) error {
 }
 
 func fetchBackup(ctx context.Context, h *http.Client, base string) (int64, []byte, error) {
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	ctx, watch, cancel := withStall(ctx) // as long as data keeps coming
 	defer cancel()
+	hc := *h
+	hc.Timeout = 0
+	h = &hc
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(base, "/")+"/peer/v1/backup", nil)
 	if err != nil {
 		return 0, nil, err
 	}
 	resp, err := h.Do(req)
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, stalled(ctx, err)
 	}
 	defer resp.Body.Close()
+	watch.touch()
 	if resp.StatusCode == http.StatusNotFound {
 		return 0, nil, errors.New("the peer holds no backup for this site")
 	}
 	if resp.StatusCode != http.StatusOK {
 		return 0, nil, fmt.Errorf("peer returned %s", resp.Status)
 	}
-	blob, err := io.ReadAll(resp.Body)
+	blob, err := io.ReadAll(touchReader{resp.Body, watch})
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, stalled(ctx, err)
 	}
 	return parseInt(resp.Header.Get("X-IBS-Generation")), blob, nil
 }
