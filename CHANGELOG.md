@@ -3,7 +3,12 @@
 Each release says what to update and which launcher and relay it works with: IBS,
 the launcher and the relay are released separately.
 
-## Unreleased
+## 1.5.2
+
+**What to update:** sites, under **Settings → Updates**; nodes follow. Relays spread
+between sites that are both on 1.5.2.
+
+**Works with:** launcher 1.0.0, relay 1.2.0 or newer (1.4.0 for short invite codes).
 
 - **Copying to other sites no longer stalls** after about 250 blocks when there are
   fewer sites than copies, or when the next site in line is full.
