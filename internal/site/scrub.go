@@ -17,16 +17,21 @@ import (
 	"ibs/internal/keys"
 )
 
-// A scrub checks everything this site stores, like a ZFS scrub: its database,
-// the encrypted copies of it on its nodes and on other sites, its own blocks,
-// and the blocks it keeps for other sites. Storage nodes check their own
-// disks; only the damaged blocks are reported back.
+// A scrub checks this site's data everywhere it is kept, like a ZFS scrub: its
+// database and the encrypted copies of it on its nodes and on other sites,
+// its own blocks, and the copies of them on other sites (scrubcopies.go).
+// Storage nodes and other sites check the blocks on their own disks; only
+// damaged blocks and challenge answers come back. Copies kept for other sites
+// are checked when their owner scrubs, and here only if it hasn't for a long
+// time.
 //
 //   - A damaged or missing block of ours is repaired from a copy on another
 //     site. If no intact copy can be reached, the files using it are listed
 //     and healing keeps trying.
+//   - A damaged, missing or mismatching copy on another site is dropped and
+//     copied again from this site.
 //   - A damaged block kept for another site is dropped; that site notices
-//     within half an hour and sends a new copy.
+//     and sends a new copy.
 //   - A damaged or missing copy of the database is sent again.
 //
 // Scrubs run on a schedule (monthly by default) and can be started, paused
@@ -59,12 +64,15 @@ type Scrub struct {
 	Bytes    int64  `json:"bytes"`
 	Repaired int64  `json:"repaired"`
 	Failed   int64  `json:"failed"` // problems that couldn't be repaired
+	// Copies of this site's blocks checked on other sites, and the bytes read there.
+	Copies    int64 `json:"copies"`
+	CopyBytes int64 `json:"copy_bytes"`
 }
 
 // ScrubError is something a scrub found.
 type ScrubError struct {
 	At       int64  `json:"at"`
-	What     string `json:"what"` // block | held | database | copy | node
+	What     string `json:"what"` // block | remote | held | database | copy | node
 	BlockID  string `json:"block_id,omitempty"`
 	Place    string `json:"place,omitempty"` // where: a node or a site, by name
 	Problem  string `json:"problem"`         // damaged | missing | unreachable
@@ -84,11 +92,11 @@ type ScrubInfo struct {
 	Unresolved   int          `json:"unresolved"` // problems found that are still there
 }
 
-const scrubCols = `id, started, finished, state, manual, phase, total, checked, bytes, repaired, failed`
+const scrubCols = `id, started, finished, state, manual, phase, total, checked, bytes, repaired, failed, copies, copy_bytes`
 
 func scanScrub(row interface{ Scan(...any) error }) (Scrub, error) {
 	var sc Scrub
-	err := row.Scan(&sc.ID, &sc.Started, &sc.Finished, &sc.State, &sc.Manual, &sc.Phase, &sc.Total, &sc.Checked, &sc.Bytes, &sc.Repaired, &sc.Failed)
+	err := row.Scan(&sc.ID, &sc.Started, &sc.Finished, &sc.State, &sc.Manual, &sc.Phase, &sc.Total, &sc.Checked, &sc.Bytes, &sc.Repaired, &sc.Failed, &sc.Copies, &sc.CopyBytes)
 	return sc, err
 }
 
@@ -156,18 +164,20 @@ func (s *Site) StartScrub(manual bool) error {
 	if s.currentScrub() != nil {
 		return errors.New("a scrub is already running")
 	}
-	var blocks, held int64
+	var blocks, copies, held int64
 	s.DB.QueryRow(`SELECT COUNT(*) FROM blocks WHERE refs > 0`).Scan(&blocks)
-	s.DB.QueryRow(`SELECT COUNT(*) FROM held_blocks`).Scan(&held)
+	s.DB.QueryRow(`SELECT COUNT(*) FROM replicas r JOIN blocks b ON b.id = r.block_id WHERE b.refs > 0 AND r.state = 'ok'`).Scan(&copies)
+	s.DB.QueryRow(`SELECT COUNT(*) FROM held_blocks WHERE verified < ?`, time.Now().Add(-heldSelfCheckAfter).Unix()).Scan(&held)
 	if _, err := s.DB.Exec(`INSERT INTO scrubs(started, state, manual, total) VALUES(?, 'running', ?, ?)`,
-		time.Now().Unix(), manual, blocks+held); err != nil {
+		time.Now().Unix(), manual, blocks+copies+held); err != nil {
 		return err
 	}
 	// Keep the latest few.
 	s.DB.Exec(`DELETE FROM scrubs WHERE id NOT IN (SELECT id FROM scrubs ORDER BY id DESC LIMIT ?)`, scrubKeep)
 	s.DB.Exec(`DELETE FROM scrub_errors WHERE scrub_id NOT IN (SELECT id FROM scrubs)`)
 	s.DB.Exec(`DELETE FROM scrub_held WHERE scrub_id NOT IN (SELECT id FROM scrubs)`)
-	s.log.Info("scrub started", "manual", manual, "blocks", blocks+held)
+	s.DB.Exec(`DELETE FROM scrub_copies WHERE scrub_id NOT IN (SELECT id FROM scrubs)`)
+	s.log.Info("scrub started", "manual", manual, "blocks", blocks, "copies_elsewhere", copies, "kept_for_others", held)
 	s.wakeScrub()
 	s.notify(TopicScrub)
 	return nil
@@ -263,14 +273,13 @@ func (s *Site) scrubEvent(force bool) {
 // runScrub works through a scrub batch by batch until it is done, paused,
 // stopped, or the site shuts down. Progress is saved after every batch.
 func (s *Site) runScrub(ctx context.Context, id int64) {
-	r := &scrubRun{s: s, id: id, unreachable: map[string]bool{}}
+	r := &scrubRun{s: s, id: id, unreachable: map[string]bool{}, skipped: map[string]bool{}, legacy: map[string]bool{}}
 	rate := scrubRate()
 	for ctx.Err() == nil {
 		var state, phase, cursor string
 		if err := s.DB.QueryRow(`SELECT state, phase, cursor FROM scrubs WHERE id = ?`, id).Scan(&state, &phase, &cursor); err != nil || state != "running" {
 			return
 		}
-		start := time.Now()
 		var n, bytes int64
 		var next string
 		switch phase {
@@ -309,14 +318,8 @@ func (s *Site) runScrub(ctx context.Context, id int64) {
 			s.DB.Exec(`UPDATE scrubs SET phase = ?, cursor = '', checked = checked + ?, bytes = bytes + ? WHERE id = ? AND state = 'running'`, next, n, bytes, id)
 		}
 		s.scrubEvent(false)
-		// Keep to the rate.
-		if want := time.Duration(float64(bytes) / float64(rate) * float64(time.Second)); want > time.Since(start) {
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(want - time.Since(start)):
-			}
-		}
+		// Keep to the rate, shared with checks other sites ask for.
+		s.scrubLimit.wait(ctx, bytes, rate)
 	}
 }
 
@@ -324,6 +327,8 @@ type scrubRun struct {
 	s           *Site
 	id          int64
 	unreachable map[string]bool // nodes already reported as unreachable in this run
+	skipped     map[string]bool // sites whose copies weren't checked, already reported
+	legacy      map[string]bool // sites too old to check copies for this site
 }
 
 func (r *scrubRun) report(e ScrubError) {
@@ -352,12 +357,13 @@ func (r *scrubRun) nodeUnreachable(node string, n int, err error) {
 		Detail: fmt.Sprintf("its blocks were not checked: %v", err)})
 }
 
-// verifyOn checks blocks on one node, on the node itself when it can.
-func (r *scrubRun) verifyOn(ctx context.Context, st blockstore.Store, ns string, ids []string) (blockstore.VerifyResult, error) {
+// verifyBlocks checks blocks on one node, on the node itself when it can, and
+// answers the challenge for intact ones when a nonce is given.
+func (s *Site) verifyBlocks(ctx context.Context, st blockstore.Store, ns string, ids []string, nonce []byte) (blockstore.VerifyResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 	if v, ok := st.(blockstore.Verifier); ok {
-		res, err := v.Verify(ctx, ns, ids)
+		res, err := v.Verify(ctx, ns, ids, nonce)
 		if !errors.Is(err, blockstore.ErrNoVerify) {
 			return res, err
 		}
@@ -375,6 +381,11 @@ func (r *scrubRun) verifyOn(ctx context.Context, st blockstore.Store, ns string,
 			res.Bytes += int64(len(data))
 			if !blockcodec.Verify(id, data) {
 				res.Damaged = append(res.Damaged, blockstore.Damaged{ID: id})
+			} else if nonce != nil {
+				if res.Answers == nil {
+					res.Answers = map[string]string{}
+				}
+				res.Answers[id] = blockstore.ChallengeAnswer(nonce, data)
 			}
 		}
 	}
@@ -469,6 +480,17 @@ func (r *scrubRun) ownBatch(ctx context.Context, cursor string) (n, bytes int64,
 	if n == 0 {
 		return 0, 0, cursor
 	}
+	// The copies on other sites are checked at the same time, with the same
+	// challenge; the answers are compared once both are in.
+	nonce := newNonce()
+	var all []string
+	for _, node := range order {
+		all = append(all, byNode[node]...)
+	}
+	remote := r.checkCopies(ctx, all, nonce)
+	local := map[string]string{}
+	defer func() { r.compareCopies(ctx, remote, local) }()
+
 	now := time.Now().Unix()
 	for _, node := range order {
 		ids := byNode[node]
@@ -485,7 +507,7 @@ func (r *scrubRun) ownBatch(ctx context.Context, cursor string) (n, bytes int64,
 		}
 		for i := 0; i < len(ids); i += scrubBatch {
 			chunk := ids[i:min(i+scrubBatch, len(ids))]
-			res, err := r.verifyOn(ctx, st, blockstore.OwnNS, chunk)
+			res, err := s.verifyBlocks(ctx, st, blockstore.OwnNS, chunk, nonce)
 			if err != nil {
 				if ctx.Err() == nil {
 					r.nodeUnreachable(s.nodeName(node), len(chunk), err)
@@ -493,6 +515,9 @@ func (r *scrubRun) ownBatch(ctx context.Context, cursor string) (n, bytes int64,
 				continue
 			}
 			bytes += res.Bytes
+			for id, a := range res.Answers {
+				local[id] = a
+			}
 			bad := map[string]bool{}
 			for _, d := range res.Damaged {
 				bad[d.ID] = true
@@ -562,8 +587,9 @@ func (s *Site) filesUsing(id string) string {
 func (r *scrubRun) heldBatch(ctx context.Context, cursor string) (n, bytes int64, next string) {
 	s := r.s
 	owner, id, _ := strings.Cut(cursor, "/")
-	rows, err := s.DB.QueryContext(ctx, `SELECT owner, id, node_id FROM held_blocks WHERE (owner, id) > (?, ?) ORDER BY owner, id LIMIT ?`,
-		owner, id, 8*scrubBatch)
+	// Only copies their owner hasn't checked for a while: owners check theirs.
+	rows, err := s.DB.QueryContext(ctx, `SELECT owner, id, node_id FROM held_blocks WHERE (owner, id) > (?, ?) AND verified < ?
+		ORDER BY owner, id LIMIT ?`, owner, id, time.Now().Add(-heldSelfCheckAfter).Unix(), 8*scrubBatch)
 	if err != nil {
 		return 0, 0, cursor
 	}
@@ -598,7 +624,7 @@ func (r *scrubRun) heldBatch(ctx context.Context, cursor string) (n, bytes int64
 		}
 		for i := 0; i < len(ids); i += scrubBatch {
 			chunk := ids[i:min(i+scrubBatch, len(ids))]
-			res, err := r.verifyOn(ctx, st, k.owner, chunk)
+			res, err := s.verifyBlocks(ctx, st, k.owner, chunk, nil)
 			if err != nil {
 				if ctx.Err() == nil {
 					r.nodeUnreachable(s.nodeName(k.node), len(chunk), err)
@@ -733,20 +759,35 @@ func (s *Site) heldReport(owner string) HeldReport {
 	return r
 }
 
-// CopyCheck is how the copies of this site's blocks on another site did in
-// that site's last scrub.
+// CopyCheck is how the copies of this site's blocks on another site did: in
+// this site's last scrub (Own), and in that site's own last scrub (for sites
+// too old to answer this site's checks).
 type CopyCheck struct {
-	SiteID string `json:"site_id"`
-	Name   string `json:"name"`
-	Copies int64  `json:"copies"` // copies of our blocks there
+	SiteID string    `json:"site_id"`
+	Name   string    `json:"name"`
+	Copies int64     `json:"copies"` // copies of our blocks there
+	Own    *OwnCheck `json:"own,omitempty"`
 	HeldReport
 	Error string `json:"error,omitempty"`
+}
+
+// OwnCheck is how a site's copies did in this site's last finished scrub.
+type OwnCheck struct {
+	Scrubbed int64 `json:"scrubbed"`
+	Checked  int64 `json:"checked"`
+	Bad      int64 `json:"bad"` // missing, damaged or failing the challenge; copied again
 }
 
 // CopyChecks asks every site holding copies of our blocks how they did in
 // its last scrub.
 func (s *Site) CopyChecks(ctx context.Context) []CopyCheck {
-	rows, err := s.DB.Query(`SELECT r.site_id, COUNT(*) FROM replicas r WHERE r.state = 'ok' GROUP BY r.site_id`)
+	// Sites holding copies now, and those checked in the last scrub (whose
+	// copies may have been dropped since, to be copied again).
+	rows, err := s.DB.Query(`SELECT site_id, SUM(n) FROM (
+			SELECT site_id, COUNT(*) AS n FROM replicas WHERE state = 'ok' GROUP BY site_id
+			UNION ALL
+			SELECT site_id, 0 FROM scrub_copies WHERE scrub_id = (SELECT MAX(id) FROM scrubs WHERE state = 'done'))
+		GROUP BY site_id ORDER BY site_id`)
 	if err != nil {
 		return nil
 	}
@@ -757,9 +798,18 @@ func (s *Site) CopyChecks(ctx context.Context) []CopyCheck {
 		out = append(out, c)
 	}
 	rows.Close()
+	last := s.lastScrub()
 	var wg sync.WaitGroup
 	for i := range out {
 		out[i].Name = s.peerName(out[i].SiteID)
+		if last != nil && last.State == "done" {
+			var o OwnCheck
+			if s.DB.QueryRow(`SELECT checked, bad FROM scrub_copies WHERE scrub_id = ? AND site_id = ?`, last.ID, out[i].SiteID).
+				Scan(&o.Checked, &o.Bad) == nil && o.Checked > 0 {
+				o.Scrubbed = last.Finished
+				out[i].Own = &o
+			}
+		}
 		wg.Add(1)
 		go func(c *CopyCheck) {
 			defer wg.Done()

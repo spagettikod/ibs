@@ -2,7 +2,8 @@
 # Tests bit-rot protection with three sites: blocks are damaged on disk, and
 #   - reading a damaged block repairs it from another site,
 #   - a scrub finds and repairs damaged blocks,
-#   - a damaged copy kept for another site is dropped and reported to its owner,
+#   - a scrub checks the copies on other sites too, by a challenge only the
+#     exact bytes answer, and has damaged ones copied again,
 #   - a block with no intact copy left is reported with the file using it, and
 #     downloading that file fails instead of returning damaged data,
 #   - a scrub can be paused, resumed and stopped.
@@ -27,7 +28,7 @@ site() { # name alias [docker args...]
 }
 site $ID-a site-a
 site $ID-b site-b
-site $ID-c site-c -e IBS_SCRUB_RATE=1K # slow, to pause and stop it
+site $ID-c site-c -e IBS_SCRUB_RATE=1M # slow with its own 50 MB, to pause and stop it
 port() { docker port $1 8080/tcp | head -1 | cut -d: -f2; }
 api() { # container method path [json]
   local p jar="$WORK/jar-$1"; p=$(port $1)
@@ -70,14 +71,21 @@ check "it repaired the damaged block"          bash -c "api $ID-a GET /api/scrub
 check "the file reads back intact"             intact
 check "nothing is left unrepaired"             bash -c "api $ID-a GET /api/scrub | grep -q '\"unresolved\":0'"
 
-echo "Copies kept for other sites"
+echo "Copies on other sites"
 damage $ID-b held
-api $ID-b POST /api/scrub/start >/dev/null
-check "site-b's scrub finishes"                wait_for 60 scrub_done $ID-b
-check "it drops the damaged copy for site-a"   bash -c "api $ID-b GET /api/scrub | grep -q '\"what\":\"held\".*\"outcome\":\"replaced\"'"
-check "site-a sees it on its Scrub page"       bash -c "api $ID-a GET /api/scrub/copies | tr '{' '\n' | grep '\"name\":\"site-b\"' | grep -q '\"damaged\":1'"
+api $ID-a POST /api/scrub/start >/dev/null
+check "site-a's scrub finishes"                wait_for 60 scrub_done $ID-a
+check "it checked the copies on site-b and site-c" bash -c "api $ID-a GET /api/scrub | grep -q '\"last\":{[^}]*\"copies\":[1-9]'"
+check "it finds the damaged copy on site-b"    bash -c "api $ID-a GET /api/scrub | grep -q '\"what\":\"remote\",\"block_id\":\"[0-9a-f]*\",\"place\":\"site-b\",\"problem\":\"damaged\",\"outcome\":\"replaced\"'"
+check "and shows it under copies on other sites" bash -c "api $ID-a GET /api/scrub/copies | grep -q '\"name\":\"site-b\",\"copies\":[0-9]*,\"own\":{[^}]*\"bad\":1'"
+check "site-c's copies all passed the challenge" bash -c "api $ID-a GET /api/scrub/copies | grep -q '\"name\":\"site-c\",\"copies\":[0-9]*,\"own\":{[^}]*\"bad\":0'"
+check "site-b gets a new copy"                 wait_for 60 bash -c "held_by $ID-b && api $ID-a GET /api/dashboard | grep -q '\"under_replicated\":0'"
+check "site-b's own scrub leaves fresh copies to their owner" bash -c "api $ID-b POST /api/scrub/start >/dev/null; sleep 1; api $ID-b GET /api/scrub | grep -q '\"total\":0'"
 
 echo "Controls"
+api $ID-c POST /api/buckets '{"name":"big"}' >/dev/null
+head -c 50000000 /dev/urandom > "$WORK/big.bin"
+curl -s -b "$WORK/jar-$ID-c" -H 'X-IBS: 1' -F "file=@$WORK/big.bin;filename=big.bin" "http://127.0.0.1:$(port $ID-c)/api/buckets/big/upload" >/dev/null
 api $ID-c POST /api/scrub/start >/dev/null
 check "site-c's scrub runs"                    bash -c "api $ID-c GET /api/scrub | grep -q '\"state\":\"running\"'"
 check "it pauses"                              bash -c "api $ID-c POST /api/scrub/pause | grep -q '\"state\":\"paused\"'"
@@ -85,7 +93,9 @@ check "it resumes"                             bash -c "api $ID-c POST /api/scru
 check "it stops"                               bash -c "api $ID-c POST /api/scrub/stop | grep -q '\"current\":null,\"last\":{[^}]*\"state\":\"stopped\"'"
 
 echo "No intact copy left"
+check "site-b's scrub finishes"                wait_for 60 scrub_done $ID-b
 damage $ID-a own
+damage $ID-b held
 damage $ID-c held
 api $ID-a POST /api/scrub/start >/dev/null
 check "the scrub finishes"                     wait_for 90 scrub_done $ID-a

@@ -69,6 +69,7 @@ func (s *Site) peerHandler() http.Handler {
 	mux.HandleFunc("PUT /peer/v1/backup", paired(s.handlePutBackup))
 	mux.HandleFunc("GET /peer/v1/backup", s.handleGetBackup) // also used by an unpaired restore client
 	mux.HandleFunc("GET /peer/v1/releases/{version}", paired(s.handleGetRelease))
+	mux.HandleFunc("POST /peer/v1/scrub/check", paired(s.handleCopyCheck))
 	mux.HandleFunc("GET /peer/v1/scrub", paired(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, s.heldReport(callerOf(r).siteID))
 	}))

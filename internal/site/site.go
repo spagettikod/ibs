@@ -71,8 +71,11 @@ type Site struct {
 	links   map[string]Link // learned from other sites
 	updates updateState
 	scrub   scrubState
-	roomMu  sync.Mutex   // one makeRoom at a time
-	noRoom  atomic.Int64 // blocks no site had room for at the last replication run
+	// scrubLimit keeps scrub reads to IBS_SCRUB_RATE: this site's scrubs and
+	// the checks other sites' scrubs ask for.
+	scrubLimit byteLimiter
+	roomMu     sync.Mutex   // one makeRoom at a time
+	noRoom     atomic.Int64 // blocks no site had room for at the last replication run
 	// replCursor: the last block of the previous replication batch (replicateOnce only).
 	replCursor string
 	replNoRoom int64    // blocks without room so far in this pass (replicateOnce only)

@@ -144,9 +144,10 @@ export type UpdatesInfo = {
 export type Scrub = {
   id: number; started: number; finished?: number; state: 'running' | 'paused' | 'done' | 'stopped'; manual: boolean
   phase: 'database' | 'own' | 'held'; total: number; checked: number; bytes: number; repaired: number; failed: number
+  copies: number; copy_bytes: number
 }
 export type ScrubError = {
-  at: number; what: 'block' | 'held' | 'database' | 'copy' | 'node'; block_id?: string; place?: string
+  at: number; what: 'block' | 'remote' | 'held' | 'database' | 'copy' | 'node'; block_id?: string; place?: string
   problem: string; outcome: 'repaired' | 'failed' | 'replaced' | 'skipped'; detail?: string; resolved?: boolean
 }
 export type ScrubInfo = {
@@ -155,4 +156,5 @@ export type ScrubInfo = {
 }
 export type CopyCheck = {
   site_id: string; name: string; copies: number; scrubbed: number; checked: number; damaged: number; running: boolean; error?: string
+  own?: { scrubbed: number; checked: number; bad: number }
 }

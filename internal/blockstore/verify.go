@@ -2,6 +2,8 @@ package blockstore
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -21,6 +23,20 @@ type Damaged struct {
 type VerifyResult struct {
 	Damaged []Damaged `json:"damaged"`
 	Bytes   int64     `json:"bytes"` // bytes read
+	// Answers to a challenge, per intact block: ChallengeAnswer of the nonce
+	// and the block's bytes. Only when a nonce was given (and the node is
+	// new enough to answer).
+	Answers map[string]string `json:"answers,omitempty"`
+}
+
+// ChallengeAnswer proves a store holds a block's exact bytes right now: the
+// SHA-256 of a fresh random nonce followed by the bytes. It can't be worked
+// out from the block's id or remembered from an earlier check.
+func ChallengeAnswer(nonce, data []byte) string {
+	h := sha256.New()
+	h.Write(nonce)
+	h.Write(data)
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // ErrNoVerify means the node is too old to check blocks itself.
@@ -28,12 +44,12 @@ var ErrNoVerify = errors.New("node can't check blocks itself")
 
 // Verifier checks stored blocks where they are, so a scrub doesn't move every
 // block over the network: a block's id is the SHA-256 of its content, so no
-// key is needed.
+// key is needed. With a nonce, intact blocks also answer that challenge.
 type Verifier interface {
-	Verify(ctx context.Context, ns string, ids []string) (VerifyResult, error)
+	Verify(ctx context.Context, ns string, ids []string, nonce []byte) (VerifyResult, error)
 }
 
-func (s *FS) Verify(ctx context.Context, ns string, ids []string) (VerifyResult, error) {
+func (s *FS) Verify(ctx context.Context, ns string, ids []string, nonce []byte) (VerifyResult, error) {
 	var res VerifyResult
 	for _, id := range ids {
 		if err := ctx.Err(); err != nil {
@@ -49,16 +65,27 @@ func (s *FS) Verify(ctx context.Context, ns string, ids []string) (VerifyResult,
 			res.Bytes += int64(len(data))
 			if !blockcodec.Verify(id, data) {
 				res.Damaged = append(res.Damaged, Damaged{ID: id})
+			} else if nonce != nil {
+				if res.Answers == nil {
+					res.Answers = map[string]string{}
+				}
+				res.Answers[id] = ChallengeAnswer(nonce, data)
 			}
 		}
 	}
 	return res, nil
 }
 
-func (r *Remote) Verify(ctx context.Context, ns string, ids []string) (VerifyResult, error) {
+// Verify on a storage node. The nonce goes in the query, so a node too old to
+// answer challenges still checks the blocks and just returns no answers.
+func (r *Remote) Verify(ctx context.Context, ns string, ids []string, nonce []byte) (VerifyResult, error) {
 	var res VerifyResult
 	body, _ := json.Marshal(ids)
-	resp, err := r.do(ctx, http.MethodPost, "/node/v1/verify/"+ns, body)
+	path := "/node/v1/verify/" + ns
+	if nonce != nil {
+		path += "?nonce=" + hex.EncodeToString(nonce)
+	}
+	resp, err := r.do(ctx, http.MethodPost, path, body)
 	if err != nil {
 		return res, err
 	}
@@ -81,11 +108,19 @@ func verifyHandler(store Store) http.HandlerFunc {
 			return
 		}
 		var ids []string
-		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&ids); err != nil {
+		var err error
+		if err = json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&ids); err != nil {
 			http.Error(w, "bad request", http.StatusBadRequest)
 			return
 		}
-		res, err := v.Verify(r.Context(), r.PathValue("ns"), ids)
+		var nonce []byte
+		if q := r.URL.Query().Get("nonce"); q != "" {
+			if nonce, err = hex.DecodeString(q); err != nil || len(nonce) < 16 {
+				http.Error(w, "bad nonce", http.StatusBadRequest)
+				return
+			}
+		}
+		res, err := v.Verify(r.Context(), r.PathValue("ns"), ids, nonce)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

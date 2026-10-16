@@ -230,6 +230,16 @@ CREATE TABLE IF NOT EXISTS scrub_held (
 	PRIMARY KEY (scrub_id, owner)
 );
 
+-- Per site: how the copies of this site's blocks there did in this site's
+-- scrub (checked; bad: missing, damaged or failing the challenge).
+CREATE TABLE IF NOT EXISTS scrub_copies (
+	scrub_id INTEGER NOT NULL,
+	site_id  TEXT NOT NULL,
+	checked  INTEGER NOT NULL DEFAULT 0,
+	bad      INTEGER NOT NULL DEFAULT 0,
+	PRIMARY KEY (scrub_id, site_id)
+);
+
 -- Short invite codes this site gave out: the number claimed on a relay, the
 -- words both sites derive their key from, and the full invite sent once the
 -- joining site proves it knows the words. used: the one attempt was made.
@@ -283,6 +293,9 @@ var migrations = []string{
 	`ALTER TABLE relays ADD COLUMN address_set INTEGER NOT NULL DEFAULT 0`,
 	`ALTER TABLE peers ADD COLUMN relay_addresses TEXT NOT NULL DEFAULT '[]'`,
 	`ALTER TABLE peers ADD COLUMN relay_removals TEXT NOT NULL DEFAULT '[]'`,
+	// Scrubs check the copies of a site's blocks on other sites too.
+	`ALTER TABLE scrubs ADD COLUMN copies INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE scrubs ADD COLUMN copy_bytes INTEGER NOT NULL DEFAULT 0`,
 }
 
 func Open(path string) (*sql.DB, error) {

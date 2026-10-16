@@ -293,7 +293,7 @@ Environment variables. All are optional.
 | `IBS_RELEASES_URL` | GitHub | Where to look for new releases |
 | `IBS_S3_ADDR` | `:9000` | S3 address |
 | `IBS_S3_DOMAIN` | | Enables `bucket.domain` S3 addresses |
-| `IBS_SCRUB_RATE` | `100M` | How fast a scrub may read, per second |
+| `IBS_SCRUB_RATE` | `100M` | How fast a scrub may read, per second, also when other sites' scrubs check their copies here |
 | `IBS_SITE_NAME` | | With `IBS_ADMIN_PASSWORD`: create the site on first start (phrase in the log) |
 | `IBS_STORAGE_LIMIT` | whole disk | Disk space for IBS, e.g. `500G`, `2T`; `0` = none. Overrides **Nodes → Change** |
 | `IBS_TLS_CA` | Let's Encrypt | ACME directory URL; `staging` = Let's Encrypt's test CA |
@@ -356,9 +356,10 @@ Environment variables. All are optional.
   copied. With fewer than two other sites online, files get as many copies as there are
   sites, and the rest follow when more sites are available.
 - **Damage is repaired.** Every block is checked against its checksum whenever it's
-  read, and once a month a scrub checks everything the site stores (the **Scrub** page
+  read, and once a month a scrub checks all of the site's files: here, and their copies
+  on other sites, which must prove they hold the exact same bytes (the **Scrub** page
   shows it, and you can start one by hand). A damaged or missing block is replaced from
-  a copy on another site. If no intact copy is left, the Scrub page names the affected
+  another copy. If no intact copy is left, the Scrub page names the affected
   files and reading them fails, instead of returning damaged data.
 - **The site's index is backed up too.** The manager's database knows which files
   exist, which blocks they consist of, and where those blocks are. An encrypted copy of

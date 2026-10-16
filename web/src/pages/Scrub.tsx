@@ -6,6 +6,7 @@ const INTERVALS = [7, 14, 30, 60, 90]
 
 const WHAT: Record<ScrubError['what'], string> = {
   block: 'Block',
+  remote: 'Copy on another site',
   held: 'Copy kept for another site',
   database: 'Database',
   copy: 'Copy of the database',
@@ -14,12 +15,12 @@ const WHAT: Record<ScrubError['what'], string> = {
 
 const PHASE: Record<Scrub['phase'], string> = {
   database: 'Checking the database',
-  own: 'Checking this site\'s blocks',
-  held: 'Checking copies kept for other sites',
+  own: 'Checking this site\'s blocks here and on other sites',
+  held: 'Checking copies kept for other sites that they haven\'t checked lately',
 }
 
 export function scrubPercent(sc: Scrub) {
-  return sc.total > 0 ? Math.min(100, Math.floor((100 * sc.checked) / sc.total)) : 0
+  return sc.total > 0 ? Math.min(100, Math.floor((100 * (sc.checked + sc.copies)) / sc.total)) : 0
 }
 
 /** One line on how a scrub went. */
@@ -52,8 +53,9 @@ export default function ScrubPage() {
         <div>
           <h1>Scrub</h1>
           <p className="muted small">
-            A scrub reads every block this site stores and checks it against its checksum, like a ZFS scrub. Damaged
-            blocks are repaired from copies on other sites. Reads are always checked too, scrub or not.
+            A scrub reads every block of this site's files and checks it against its checksum, like a ZFS scrub: here, and
+            the copies on other sites, which must prove they hold the exact same bytes. Damaged blocks are repaired from
+            another copy. Reads are always checked too, scrub or not.
           </p>
         </div>
       </header>
@@ -72,9 +74,10 @@ export default function ScrubPage() {
           <div className="stack">
             <div className="scrub-progress">
               <b>{cur.state === 'paused' ? 'Paused' : PHASE[cur.phase]} · {scrubPercent(cur)}%</b>
-              <Meter used={cur.checked} total={cur.total} />
+              <Meter used={cur.checked + cur.copies} total={cur.total} />
               <span className="muted small">
-                {cur.checked.toLocaleString()} of {cur.total.toLocaleString()} blocks checked, {fmtBytes(cur.bytes)} read ·
+                {(cur.checked + cur.copies).toLocaleString()} of {cur.total.toLocaleString()} checked
+                ({cur.checked.toLocaleString()} here, {cur.copies.toLocaleString()} copies on other sites), {fmtBytes(cur.bytes + cur.copy_bytes)} read ·
                 started {ago(cur.started)} {cur.manual ? 'by hand' : 'on schedule'} · {scrubResult(cur)}
               </span>
             </div>
@@ -133,7 +136,7 @@ export default function ScrubPage() {
                 <tr key={h.id}>
                   <td>{ago(h.started)}<div className="muted small">{h.manual ? 'by hand' : 'on schedule'}</div></td>
                   <td>{h.finished ? fmtDuration(h.finished - h.started) : h.state === 'paused' ? 'paused' : 'running'}</td>
-                  <td className="num">{fmtBytes(h.bytes)}<div className="muted small">{h.checked.toLocaleString()} blocks</div></td>
+                  <td className="num">{fmtBytes(h.bytes + h.copy_bytes)}<div className="muted small">{h.checked.toLocaleString()} here{h.copies > 0 && `, ${h.copies.toLocaleString()} elsewhere`}</div></td>
                   <td>{h.state === 'stopped' ? <span className="muted">Stopped · </span> : null}{scrubResult(h)}</td>
                 </tr>
               ))}
@@ -159,22 +162,35 @@ function CopiesCard() {
   return (
     <Card title="Your copies on other sites" actions={<button className="btn small" onClick={reload}>Refresh</button>}>
       <p className="muted small">
-        Each site scrubs what it stores, including the copies it keeps for this site, and replaces damaged ones from
-        this site.
+        This site's scrub checks its copies on other sites too. A site on an older version checks them itself in its own
+        scrub.
       </p>
       <ErrorBox error={error} />
       {!data ? <p className="muted">Asking the other sites…</p> : data.length === 0 ? <Empty>No copies on other sites yet.</Empty> : (
         <table>
-          <thead><tr><th>Site</th><th className="num">Copies</th><th>Last scrub there</th><th>Result</th></tr></thead>
+          <thead><tr><th>Site</th><th className="num">Copies</th><th>Last checked</th><th>Result</th></tr></thead>
           <tbody>
             {data.map((c) => (
               <tr key={c.site_id}>
                 <td>{c.name}</td>
                 <td className="num">{c.copies.toLocaleString()}</td>
-                <td>{c.error ? <span className="muted">{c.error}</span> : c.scrubbed ? ago(c.scrubbed) : 'not yet'}{c.running && <div className="muted small">a scrub is running</div>}</td>
-                <td>{c.error || !c.scrubbed ? '—' : c.damaged > 0
-                  ? <span className="warn-text">{c.damaged} damaged, replaced from this site</span>
-                  : `${c.checked.toLocaleString()} checked, all intact`}</td>
+                {c.own ? (
+                  <>
+                    <td>{ago(c.own.scrubbed)}<div className="muted small">by this site's scrub</div></td>
+                    <td>{c.own.bad > 0
+                      ? <span className="warn-text">{c.own.bad} missing or damaged, copied again from this site</span>
+                      : `${c.own.checked.toLocaleString()} checked, all identical`}</td>
+                  </>
+                ) : (
+                  <>
+                    <td>{c.error ? <span className="muted">{c.error}</span> : c.scrubbed ? ago(c.scrubbed) : 'not yet'}
+                      {!c.error && c.scrubbed > 0 && <div className="muted small">by its own scrub</div>}
+                      {c.running && <div className="muted small">a scrub is running</div>}</td>
+                    <td>{c.error || !c.scrubbed ? '—' : c.damaged > 0
+                      ? <span className="warn-text">{c.damaged} damaged, replaced from this site</span>
+                      : `${c.checked.toLocaleString()} checked, all intact`}</td>
+                  </>
+                )}
               </tr>
             ))}
           </tbody>

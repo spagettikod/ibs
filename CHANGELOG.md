@@ -5,6 +5,12 @@ the launcher and the relay are released separately.
 
 ## Unreleased
 
+- **A scrub checks your copies on other sites too.** Each batch of your blocks is
+  checked here and, at the same time, on the sites holding copies. They must answer a
+  fresh challenge that only the exact same bytes answer, so your site compares the
+  copies itself. Missing, damaged or different copies are copied again. Sites check
+  copies they keep for others only when the owner hasn't for 60 days. Sites on older
+  versions still check copies themselves.
 - The scrub history shows how much data each scrub read, besides the blocks.
 
 ## 1.5.4
