@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"ibs/internal/config"
 	"ibs/internal/keys"
 	"ibs/internal/release"
+	"ibs/internal/stall"
 )
 
 // FetchRelease gets the version of IBS the manager runs, for a node's first
@@ -52,15 +54,15 @@ func FetchRelease(ctx context.Context, cfg config.Config, tokenArg string) (rele
 	if err != nil {
 		return release.Bundle{}, nil, err
 	}
-	client := &http.Client{
-		Timeout:   5 * time.Minute,
-		Transport: &http.Transport{TLSClientConfig: keys.ClientTLS(cert, key)},
-	}
+	// Limited by progress (stall.Do), not by total time.
+	client := &http.Client{Transport: &http.Transport{TLSClientConfig: keys.ClientTLS(cert, key),
+		DialContext:         (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		TLSHandshakeTimeout: 10 * time.Second}}
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+addr+"/cluster/v1/release", nil)
 	if secret != "" {
 		req.Header.Set("X-IBS-Join-Secret", secret)
 	}
-	resp, err := client.Do(req)
+	resp, err := stall.Do(client, req)
 	if err != nil {
 		return release.Bundle{}, nil, err
 	}

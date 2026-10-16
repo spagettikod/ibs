@@ -249,7 +249,7 @@ func (pc *peerClient) setQUIC(conn *quic.Conn, ep *net.UDPAddr) {
 			return c, nil
 		},
 	}
-	q.client = &http.Client{Transport: q.tr, Timeout: peerClientTimeout}
+	q.client = &http.Client{Transport: q.tr} // limited by progress (stall.Do)
 	pc.mu.Lock()
 	if pc.quic != nil {
 		pc.quic.close()

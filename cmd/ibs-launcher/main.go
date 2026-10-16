@@ -39,6 +39,7 @@ import (
 	"ibs/internal/config"
 	"ibs/internal/node"
 	"ibs/internal/release"
+	"ibs/internal/stall"
 )
 
 // Version is the launcher's own version; see CHANGELOG.md next to this file.
@@ -158,9 +159,8 @@ func fromManager(store release.Store) error {
 	if len(os.Args) > 2 && os.Args[1] == "node" {
 		token = os.Args[2]
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-	b, keys, err := node.FetchRelease(ctx, cfg, token)
+	// No total time limit: the download fails when it makes no progress.
+	b, keys, err := node.FetchRelease(context.Background(), cfg, token)
 	if err != nil {
 		return err
 	}
@@ -181,8 +181,7 @@ func fromManager(store release.Store) error {
 // the newest release, beta or not.
 func downloadLatest(url string) (release.Bundle, error) {
 	betas, _ := strconv.ParseBool(os.Getenv("IBS_BETA"))
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
+	ctx := context.Background() // requests fail when they make no progress (get)
 	resp, err := get(ctx, url)
 	if err != nil {
 		return release.Bundle{}, err
@@ -213,7 +212,7 @@ func get(ctx context.Context, url string) (*http.Response, error) {
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/octet-stream, application/json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := stall.Do(http.DefaultClient, req)
 	if err != nil {
 		return nil, err
 	}

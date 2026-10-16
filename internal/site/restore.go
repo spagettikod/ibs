@@ -19,6 +19,7 @@ import (
 	"ibs/internal/db"
 	"ibs/internal/keys"
 	"ibs/internal/relay"
+	"ibs/internal/stall"
 )
 
 // RestoreOptions name the recovery phrase and where to fetch the metadata
@@ -273,30 +274,24 @@ func writeDB(path string, raw []byte) error {
 }
 
 func fetchBackup(ctx context.Context, h *http.Client, base string) (int64, []byte, error) {
-	ctx, watch, cancel := withStall(ctx) // as long as data keeps coming
-	defer cancel()
-	hc := *h
-	hc.Timeout = 0
-	h = &hc
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(base, "/")+"/peer/v1/backup", nil)
 	if err != nil {
 		return 0, nil, err
 	}
-	resp, err := h.Do(req)
+	resp, err := stall.Do(h, req) // as long as data keeps coming
 	if err != nil {
-		return 0, nil, stalled(ctx, err)
+		return 0, nil, err
 	}
 	defer resp.Body.Close()
-	watch.touch()
 	if resp.StatusCode == http.StatusNotFound {
 		return 0, nil, errors.New("the peer holds no backup for this site")
 	}
 	if resp.StatusCode != http.StatusOK {
 		return 0, nil, fmt.Errorf("peer returned %s", resp.Status)
 	}
-	blob, err := io.ReadAll(touchReader{resp.Body, watch})
+	blob, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return 0, nil, stalled(ctx, err)
+		return 0, nil, err
 	}
 	return parseInt(resp.Header.Get("X-IBS-Generation")), blob, nil
 }

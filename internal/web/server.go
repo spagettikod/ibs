@@ -3,7 +3,6 @@
 package web
 
 import (
-	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -654,9 +653,8 @@ func (s *Server) handleSetupRestore(w http.ResponseWriter, r *http.Request) {
 	if req.PeerAdvertise != "" {
 		cfg.PeerAdvertise = strings.TrimSpace(req.PeerAdvertise)
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
-	defer cancel()
-	st, err := site.Restore(ctx, cfg, site.RestoreOptions{
+	// No total time limit: the downloads fail when they make no progress.
+	st, err := site.Restore(r.Context(), cfg, site.RestoreOptions{
 		Phrase: req.Phrase, NodeAddress: strings.TrimSpace(req.NodeAddress), PeerAddress: strings.TrimSpace(req.PeerAddress), RelayAddress: req.RelayAddress, RelayToken: strings.TrimSpace(req.RelayToken),
 		PeerSiteID: strings.TrimSpace(req.PeerSiteID), Password: req.Password,
 	})

@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
+
+	"ibs/internal/stall"
 )
 
 // Remote is a Store backed by a storage node's API. The client must use
@@ -30,7 +32,7 @@ func (r *Remote) do(ctx context.Context, method, path string, body []byte) (*htt
 	if err != nil {
 		return nil, err
 	}
-	return r.Client.Do(req)
+	return stall.Do(r.Client, req) // limited by progress, not total time
 }
 
 func blockPath(ns, id string) string { return "/node/v1/blocks/" + ns + "/" + id }

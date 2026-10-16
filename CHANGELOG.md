@@ -12,10 +12,11 @@ the launcher and the relay are released separately.
   copies they keep for others only when the owner hasn't for 60 days. Sites on older
   versions still check copies themselves.
 - The scrub history shows how much data each scrub read, besides the blocks.
-- **Failing fast:** requests between sites have no long time limits any more.
-  Downloads (new versions, database copies, restores) go on as long as data keeps
-  arriving and fail after 30 seconds without any; other requests finish within
-  seconds. Connecting to a storage node gives up after 5 seconds.
+- **Limits by progress, not by time:** transfers between sites and storage nodes, in
+  either direction, have no total time limit. They go on as long as data moves, and
+  fail after 30 seconds without any progress, including waiting for an answer. Work
+  behind a single request is kept to seconds, so that limit only catches real failures.
+  Connecting gives up after 5 seconds. Storage nodes now update over slow networks too.
 
 ## 1.5.4
 

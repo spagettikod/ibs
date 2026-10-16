@@ -17,6 +17,7 @@ import (
 
 	"ibs/internal/db"
 	"ibs/internal/release"
+	"ibs/internal/stall"
 	"ibs/internal/version"
 )
 
@@ -446,7 +447,7 @@ func (s *Site) fetchReleases(ctx context.Context) {
 		}
 		// A release is tens of megabytes: it may take as long as data keeps coming.
 		var data []byte
-		_, err := s.peerCall(streaming(ctx), pr.site, http.MethodGet, "/peer/v1/releases/"+r.Version, nil, &data)
+		_, err := s.peerCall(ctx, pr.site, http.MethodGet, "/peer/v1/releases/"+r.Version, nil, &data)
 		if err == nil {
 			_, err = s.UploadRelease(bytes.NewReader(data))
 		}
@@ -551,16 +552,14 @@ func (s *Site) CheckGitHubNow(ctx context.Context) {
 // checkGitHub looks at the latest release on GitHub and downloads it when it
 // is newer than what this site holds.
 func (s *Site) checkGitHub(ctx context.Context) {
-	// No total time limit: the download fails when no data arrived for
-	// stallTimeout, so a slow line still gets there and a dead one fails fast.
-	ctx, watch, cancel := withStall(ctx)
-	defer cancel()
+	// No total time limit: requests fail when they make no progress
+	// (httpGet), so a slow line still gets there and a dead one fails fast.
 	err := func() error {
 		resp, err := httpGet(ctx, release.ReleasesURL())
 		if err != nil {
 			return err
 		}
-		body, err := io.ReadAll(io.LimitReader(touchReader{resp.Body, watch}, 8<<20))
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 		resp.Body.Close()
 		if err != nil {
 			return err
@@ -589,14 +588,13 @@ func (s *Site) checkGitHub(ctx context.Context) {
 			return err
 		}
 		defer resp.Body.Close()
-		in, err := s.UploadRelease(touchReader{resp.Body, watch})
+		in, err := s.UploadRelease(resp.Body)
 		if err != nil {
 			return err
 		}
 		s.log.Info("downloaded release from GitHub", "version", in.Version)
 		return nil
 	}()
-	err = stalled(ctx, err)
 	s.updates.mu.Lock()
 	s.updates.githubChecked = time.Now()
 	s.updates.githubError = ""
@@ -613,7 +611,7 @@ func httpGet(ctx context.Context, url string) (*http.Response, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := stall.Do(http.DefaultClient, req)
 	if err != nil {
 		return nil, err
 	}

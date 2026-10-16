@@ -5,8 +5,10 @@
 #   - the images the suites build (ibs, ibs-relay, ibs-launcher, ibs-pebble)
 #     and the ones only they download (rclone, curl, busybox)
 #   - untagged layers of earlier IBS builds (labelled with the IBS repository)
-# The local demo (compose project "ibs"), the alpine base image and Docker's
-# build cache are left alone.
+#   - Docker's build cache beyond 2 GB (every image build adds layers; it grew
+#     to 14 GB between runs)
+# The local demo (compose project "ibs") and the alpine base image are left
+# alone.
 #
 #   test/cleanup.sh
 set -u
@@ -34,4 +36,5 @@ images=$(docker images -q --filter reference=ibs --filter reference=ibs-relay --
 dangling=$(docker images -q --filter dangling=true --filter label=org.opencontainers.image.source=https://github.com/spagettikod/ibs)
 all=$(echo $images $dangling | tr ' ' '\n' | sort -u)
 [ -n "$all" ] && docker rmi -f $all >/dev/null 2>&1
-docker system df | sed -n '1,2p'
+docker builder prune -f --max-used-space 2GB >/dev/null 2>&1
+docker system df | sed -n '1,2p;5p'

@@ -24,6 +24,7 @@ import (
 	"ibs/internal/config"
 	"ibs/internal/keys"
 	"ibs/internal/release"
+	"ibs/internal/stall"
 	"ibs/internal/version"
 )
 
@@ -192,10 +193,11 @@ func Run(ctx context.Context, cfg config.Config, tokenArg string) error {
 	port, _ := strconv.Atoi(portStr)
 	slog.Info("storage node running", "node", st.ID, "listen", cfg.NodeAddr, "manager", st.Manager, "storage_limit", cfg.StorageLimit)
 
-	client := &http.Client{
-		Timeout:   30 * time.Second,
-		Transport: &http.Transport{TLSClientConfig: keys.ClientTLS(cert, managerKey)},
-	}
+	// Requests are limited by their progress (stall.Do), not by total time:
+	// fetching a new version may take a while on a slow network.
+	client := &http.Client{Transport: &http.Transport{TLSClientConfig: keys.ClientTLS(cert, managerKey),
+		DialContext:         (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		TLSHandshakeTimeout: 10 * time.Second}}
 	register := func() error {
 		capacity, free, err := store.Stat(ctx)
 		if err != nil {
@@ -208,7 +210,7 @@ func Run(ctx context.Context, cfg config.Config, tokenArg string) error {
 		}
 		body, _ := json.Marshal(reg)
 		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "https://"+st.Manager+"/cluster/v1/register", bytes.NewReader(body))
-		resp, err := client.Do(req)
+		resp, err := stall.Do(client, req)
 		if err != nil {
 			return err
 		}
@@ -275,7 +277,7 @@ func follow(ctx context.Context, client *http.Client, dataDir, manager string, r
 		}
 	}
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+manager+"/cluster/v1/releases/"+reply.TargetVersion, nil)
-	resp, err := client.Do(req)
+	resp, err := stall.Do(client, req)
 	if err != nil {
 		return err
 	}

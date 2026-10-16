@@ -27,24 +27,7 @@ import (
 const (
 	peerTimeout = 30 * time.Second
 	inviteTTL   = 24 * time.Hour
-	// peerClientTimeout is only a last resort: each call has its own, much
-	// shorter limit (peerTimeout, or stallTimeout while data keeps coming).
-	peerClientTimeout = 30 * time.Minute
 )
-
-// stallTimeout: a download (streaming) fails when no data arrived for this
-// long. A variable for tests.
-var stallTimeout = 30 * time.Second
-
-type streamingKey struct{}
-
-// streaming marks peer requests made with the returned context as downloads
-// that may take as long as data keeps arriving: instead of peerTimeout they
-// fail when nothing arrived for stallTimeout. A slow link keeps going; a dead
-// one fails fast.
-func streaming(ctx context.Context) context.Context {
-	return context.WithValue(ctx, streamingKey{}, true)
-}
 
 var errPeerStatus = errors.New("peer request failed")
 
@@ -89,11 +72,9 @@ func pinnedHTTP(cert tls.Certificate, pin ed25519.PublicKey, seen *ed25519.Publi
 			return nil
 		},
 	}
-	// Fail fast: connecting and the handshake get seconds, not minutes. The
-	// total limit is a last resort for requests to storage nodes; a restore
-	// download sets its own (fetchBackup) and lifts it.
+	// Connecting and the handshake get seconds; requests are limited by their
+	// progress (stall.Do), not by total time.
 	return &http.Client{
-		Timeout: 2 * time.Minute,
 		Transport: &http.Transport{TLSClientConfig: tlsCfg, MaxIdleConnsPerHost: 8, IdleConnTimeout: 90 * time.Second,
 			DialContext:         (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
 			TLSHandshakeTimeout: 10 * time.Second},

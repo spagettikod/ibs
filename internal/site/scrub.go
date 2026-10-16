@@ -360,9 +360,6 @@ func (r *scrubRun) nodeUnreachable(node string, n int, err error) {
 // verifyBlocks checks blocks on one node, on the node itself when it can, and
 // answers the challenge for intact ones when a nonce is given.
 func (s *Site) verifyBlocks(ctx context.Context, st blockstore.Store, ns string, ids []string, nonce []byte) (blockstore.VerifyResult, error) {
-	ctx, cancel := context.WithTimeout(ctx, time.Minute) // scrubBatch blocks on a node: seconds
-
-	defer cancel()
 	if v, ok := st.(blockstore.Verifier); ok {
 		res, err := v.Verify(ctx, ns, ids, nonce)
 		if !errors.Is(err, blockstore.ErrNoVerify) {
@@ -414,9 +411,7 @@ func (r *scrubRun) database(ctx context.Context) {
 		if !ok {
 			continue
 		}
-		cctx, cancel := context.WithTimeout(ctx, time.Minute) // over the local network
-		_, blob, err := rm.GetMetadata(cctx)
-		cancel()
+		_, blob, err := rm.GetMetadata(ctx)
 		problem := ""
 		switch {
 		case err != nil && strings.Contains(err.Error(), "404"):
@@ -436,7 +431,7 @@ func (r *scrubRun) database(ctx context.Context) {
 	}
 	for _, p := range s.onlinePeers() {
 		var blob []byte
-		_, err := s.peerCall(streaming(ctx), p.siteID, http.MethodGet, "/peer/v1/backup", nil, &blob)
+		_, err := s.peerCall(ctx, p.siteID, http.MethodGet, "/peer/v1/backup", nil, &blob)
 		problem := ""
 		switch {
 		case isStatus(err, http.StatusNotFound):
