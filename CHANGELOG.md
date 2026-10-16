@@ -3,6 +3,10 @@
 Each release says what to update and which launcher and relay it works with: IBS,
 the launcher and the relay are released separately.
 
+## Unreleased
+
+- The scrub history shows how much data each scrub read, besides the blocks.
+
 ## 1.5.4
 
 **What to update:** sites, under **Settings → Updates**; nodes follow.

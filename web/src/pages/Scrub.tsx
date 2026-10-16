@@ -127,13 +127,13 @@ export default function ScrubPage() {
       <Card title="History">
         {data.history.length === 0 ? <Empty>No scrubs yet.</Empty> : (
           <table>
-            <thead><tr><th>Started</th><th>Took</th><th className="num">Blocks</th><th>Result</th></tr></thead>
+            <thead><tr><th>Started</th><th>Took</th><th className="num">Checked</th><th>Result</th></tr></thead>
             <tbody>
               {data.history.map((h) => (
                 <tr key={h.id}>
                   <td>{ago(h.started)}<div className="muted small">{h.manual ? 'by hand' : 'on schedule'}</div></td>
                   <td>{h.finished ? fmtDuration(h.finished - h.started) : h.state === 'paused' ? 'paused' : 'running'}</td>
-                  <td className="num">{h.checked.toLocaleString()}</td>
+                  <td className="num">{fmtBytes(h.bytes)}<div className="muted small">{h.checked.toLocaleString()} blocks</div></td>
                   <td>{h.state === 'stopped' ? <span className="muted">Stopped · </span> : null}{scrubResult(h)}</td>
                 </tr>
               ))}
