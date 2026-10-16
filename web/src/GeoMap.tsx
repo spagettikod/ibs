@@ -2,7 +2,7 @@ import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, Location, NetSite } from './api'
-import NetworkGraph from './NetworkGraph'
+import NetworkGraph, { Rates } from './NetworkGraph'
 
 // Map tiles come from OpenStreetMap; only the map images are fetched, nothing
 // about the IBS is sent there. Shown in greyscale (inverted in dark mode).
@@ -134,11 +134,11 @@ export function ViewSwitch({ view, onChange }: { view: 'diagram' | 'map'; onChan
   )
 }
 
-type ViewProps = Props & { relays: { id: string; name: string }[]; upSince: number; view: 'diagram' | 'map' }
+type ViewProps = Props & { relays: { id: string; name: string }[]; upSince: number; view: 'diagram' | 'map'; rates?: Rates }
 
 /** The IBS as a diagram or on a map. */
-export function NetworkView({ view, self, sites, links, relays, upSince, compact }: ViewProps) {
+export function NetworkView({ view, self, sites, links, relays, upSince, compact, rates }: ViewProps) {
   return view === 'map'
     ? <GeoMap self={self} sites={sites} links={links} compact={compact} />
-    : <NetworkGraph compact={compact} selfId={self.id} selfName={self.name} selfUpSince={upSince} sites={sites} links={links} relays={relays} />
+    : <NetworkGraph compact={compact} selfId={self.id} selfName={self.name} selfUpSince={upSince} sites={sites} links={links} relays={relays} rates={rates} />
 }

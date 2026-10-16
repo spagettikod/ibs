@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"time"
 
 	"ibs/internal/blockcodec"
@@ -17,8 +18,9 @@ import (
 )
 
 const (
-	gcGrace        = 10 * time.Minute // unreferenced blocks younger than this are kept
-	replicateBatch = 256
+	gcGrace          = 10 * time.Minute // unreferenced blocks younger than this are kept
+	replicateBatch   = 256              // blocks looked up at a time
+	replicateWorkers = 4                // blocks copied at the same time
 )
 
 type peerCandidate struct {
@@ -74,85 +76,55 @@ func (s *Site) replicationNeeds(ctx context.Context) ([]replNeed, error) {
 // that have been unreachable longer than the grace period do not count, so
 // their blocks are re-replicated elsewhere. Blocks every online site already
 // holds wait for another site to come online.
-func (s *Site) replicateOnce(ctx context.Context) {
+//
+// Up to replicateWorkers blocks are copied at the same time, so a link with a
+// long round trip is used well. It reports whether it copied anything: then
+// the next batch follows at once.
+func (s *Site) replicateOnce(ctx context.Context) bool {
 	needs, err := s.replicationNeeds(ctx)
 	if err != nil {
 		s.log.Warn("replication query", "err", err)
-		return
+		return false
 	}
 	if len(needs) == 0 {
 		s.noRoom.Store(s.replNoRoom)
 		s.replNoRoom = 0
-		return
+		return false
 	}
 
 	peers := s.onlinePeers()
 	if len(peers) == 0 {
-		return
+		return false
 	}
+	var mu sync.Mutex // guards full, copied and noRoom
 	full := map[string]bool{}
 	copied, noRoom := 0, int64(0)
+	isFull := func(sid string) bool { mu.Lock(); defer mu.Unlock(); return full[sid] }
+	work := make(chan replNeed)
+	var wg sync.WaitGroup
+	for range replicateWorkers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for nd := range work {
+				c, nr := s.replicateBlock(ctx, nd, peers, isFull, func(sid string) { mu.Lock(); full[sid] = true; mu.Unlock() })
+				mu.Lock()
+				copied += c
+				if nr {
+					noRoom++
+				}
+				mu.Unlock()
+			}
+		}()
+	}
 	for _, nd := range needs {
 		if ctx.Err() != nil {
-			return
+			break
 		}
-		have := map[string]bool{}
-		hr, err := s.DB.Query(`SELECT site_id FROM replicas WHERE block_id = ?`, nd.id)
-		if err != nil {
-			return
-		}
-		for hr.Next() {
-			var sid string
-			hr.Scan(&sid)
-			have[sid] = true
-		}
-		hr.Close()
-		var targets []string
-		anyFull := false
-		for _, p := range peers {
-			if len(targets) == nd.missing {
-				break
-			}
-			if !have[p.siteID] && full[p.siteID] {
-				anyFull = true
-			}
-			if !have[p.siteID] && !full[p.siteID] {
-				targets = append(targets, p.siteID)
-			}
-		}
-		if len(targets) == 0 {
-			if anyFull {
-				noRoom++
-			}
-			continue
-		}
-		ct, err := s.readBlock(ctx, nd.id)
-		if err != nil {
-			s.log.Warn("cannot read block for replication", "block", nd.id[:12], "err", err)
-			continue
-		}
-		placed, refused := 0, 0
-		for _, sid := range targets {
-			err := s.peerPutBlock(ctx, sid, nd.id, ct)
-			if isStatus(err, http.StatusInsufficientStorage) {
-				full[sid] = true
-				refused++
-				continue
-			}
-			if err != nil {
-				s.log.Warn("replicate block", "block", nd.id[:12], "peer", sid[:8], "err", err)
-				continue
-			}
-			s.DB.Exec(`INSERT INTO replicas(block_id, site_id, state, verified) VALUES(?, ?, 'ok', ?)
-				ON CONFLICT(block_id, site_id) DO UPDATE SET state = 'ok', verified = excluded.verified`,
-				nd.id, sid, time.Now().Unix())
-			copied++
-			placed++
-		}
-		if refused > 0 && placed < nd.missing {
-			noRoom++
-		}
+		work <- nd
 	}
+	close(work)
+	wg.Wait()
 	// Counted over a whole pass through the blocks, not one batch.
 	s.replNoRoom += noRoom
 	if s.replCursor == "" {
@@ -163,6 +135,65 @@ func (s *Site) replicateOnce(ctx context.Context) {
 		s.notify(TopicReplication)
 		s.log.Info("replicated blocks", "copies", copied)
 	}
+	return copied > 0
+}
+
+// replicateBlock copies one block to the sites it's missing on. It returns
+// the copies made, and whether a copy is missing because sites are full.
+func (s *Site) replicateBlock(ctx context.Context, nd replNeed, peers []peerCandidate, isFull func(string) bool, markFull func(string)) (int, bool) {
+	have := map[string]bool{}
+	hr, err := s.DB.Query(`SELECT site_id FROM replicas WHERE block_id = ?`, nd.id)
+	if err != nil {
+		return 0, false
+	}
+	for hr.Next() {
+		var sid string
+		hr.Scan(&sid)
+		have[sid] = true
+	}
+	hr.Close()
+	var targets []string
+	anyFull := false
+	for _, p := range peers {
+		if len(targets) == nd.missing {
+			break
+		}
+		if have[p.siteID] {
+			continue
+		}
+		if isFull(p.siteID) {
+			anyFull = true
+		} else {
+			targets = append(targets, p.siteID)
+		}
+	}
+	if len(targets) == 0 {
+		return 0, anyFull
+	}
+	ct, err := s.readBlock(ctx, nd.id)
+	if err != nil {
+		s.log.Warn("cannot read block for replication", "block", nd.id[:12], "err", err)
+		return 0, false
+	}
+	placed, refused := 0, 0
+	for _, sid := range targets {
+		err := s.peerPutBlock(ctx, sid, nd.id, ct)
+		if isStatus(err, http.StatusInsufficientStorage) {
+			markFull(sid)
+			refused++
+			continue
+		}
+		if err != nil {
+			s.log.Warn("replicate block", "block", nd.id[:12], "peer", sid[:8], "err", err)
+			continue
+		}
+		s.sentCopy(sid, len(ct))
+		s.DB.Exec(`INSERT INTO replicas(block_id, site_id, state, verified) VALUES(?, ?, 'ok', ?)
+			ON CONFLICT(block_id, site_id) DO UPDATE SET state = 'ok', verified = excluded.verified`,
+			nd.id, sid, time.Now().Unix())
+		placed++
+	}
+	return placed, refused > 0 && placed < nd.missing
 }
 
 // trimOnce removes surplus replicas, e.g. after a long-offline peer returns
@@ -632,6 +663,7 @@ type ReplicationHealth struct {
 	CopiesMade     int64 `json:"copies_made"`
 	CopiesPossible int64 `json:"copies_possible"`
 	Copying        int64 `json:"copying"`
+	CopyingBytes   int64 `json:"copying_bytes"` // still to send for those
 }
 
 func (s *Site) ReplicationHealth() ReplicationHealth {
@@ -654,12 +686,13 @@ func (s *Site) ReplicationHealth() ReplicationHealth {
 		WHERE n > replication`).Scan(&h.OverReplicated)
 	var sites int64
 	s.DB.QueryRow(`SELECT COUNT(*) FROM peers WHERE last_seen >= ?`, countedSince).Scan(&sites)
-	s.DB.QueryRow(`SELECT COALESCE(SUM(min(n, want)), 0), COALESCE(SUM(want), 0), COUNT(CASE WHEN n < want THEN 1 END) FROM (
-			SELECT min(bk.replication, ?) AS want,
+	s.DB.QueryRow(`SELECT COALESCE(SUM(min(n, want)), 0), COALESCE(SUM(want), 0), COUNT(CASE WHEN n < want THEN 1 END),
+			COALESCE(SUM(CASE WHEN n < want THEN (want - n) * size END), 0) FROM (
+			SELECT min(bk.replication, ?) AS want, b.size,
 				(SELECT COUNT(*) FROM replicas r JOIN peers p ON p.site_id = r.site_id
 					WHERE r.block_id = b.id AND r.state = 'ok' AND p.last_seen >= ?) AS n
 			FROM blocks b JOIN buckets bk ON bk.name = b.bucket WHERE b.refs > 0)`, sites, countedSince).
-		Scan(&h.CopiesMade, &h.CopiesPossible, &h.Copying)
+		Scan(&h.CopiesMade, &h.CopiesPossible, &h.Copying, &h.CopyingBytes)
 	return h
 }
 

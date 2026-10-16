@@ -6,6 +6,13 @@ type SiteNode = { id: string; name: string; self: boolean; online: boolean; upSi
 type RelayPos = RelayNode & { x: number; y: number }
 type Edge = { key: string; a: string; b: string; link: Link }
 
+/** Copy traffic between this site and each other site, bytes per second. */
+export type Rates = Record<string, { out: number; in: number }>
+
+export function ratesOf(peers: { site_id: string; out_bps: number; in_bps: number }[]): Rates {
+  return Object.fromEntries(peers.map((p) => [p.site_id, { out: p.out_bps, in: p.in_bps }]))
+}
+
 type Props = {
   selfId: string
   selfName: string
@@ -14,6 +21,7 @@ type Props = {
   links: Link[]
   relays: RelayNode[]
   compact?: boolean
+  rates?: Rates
 }
 
 function kindLabel(l: Link) {
@@ -86,10 +94,13 @@ function edgeClass(l: Link) {
  * there are two), relays in the middle. Direct connections are solid lines
  * that bend around relays in their way; relayed ones are dashed curves
  * through their relay. There are no labels: pointing at a site or relay shows its
- * name, and selecting a site or connection shows its details below.
+ * name, and selecting a site or connection shows its details below. While
+ * copies move between this site and another, dots run along their connection
+ * in the direction they go; pointing at it shows the speed.
  */
-export default function NetworkGraph({ selfId, selfName, selfUpSince, sites, links, relays, compact }: Props) {
+export default function NetworkGraph({ selfId, selfName, selfUpSince, sites, links, relays, compact, rates = {} }: Props) {
   const [selected, setSelected] = useState<string>()
+  const [hoverEdge, setHoverEdge] = useState<string>()
   const [hover, setHover] = useState<string>() // node or 'relay:<id>' under the pointer: its name is shown
   const { ref, width } = useWidth()
   const W = Math.max(width, 300)
@@ -164,6 +175,15 @@ export default function NetworkGraph({ selfId, selfName, selfUpSince, sites, lin
     return { d: `M${a.x},${a.y}Q${qx},${qy} ${b.x},${b.y}`, lx, ly }
   }
 
+  // Copy traffic on an edge of this site, from a to b and back.
+  const flow = (e: Edge) => {
+    const other = e.a === selfId ? e.b : e.b === selfId ? e.a : undefined
+    const r = other ? rates[other] : undefined
+    if (!r) return { ab: 0, ba: 0 }
+    return e.a === selfId ? { ab: r.out, ba: r.in } : { ab: r.in, ba: r.out }
+  }
+  const reduceMotion = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+
   const sel = selected
   const selEdge = edges.find((e) => e.key === sel)
   const selNode = nodes.find((n) => n.id === sel)
@@ -183,9 +203,17 @@ export default function NetworkGraph({ selfId, selfName, selfUpSince, sites, lin
           const mine = e.a === selfId || e.b === selfId
           return (
             <g key={e.key} className={`${edgeClass(e.link)} ${mine ? 'mine' : ''} ${sel === e.key ? 'selected' : ''}`}
-              onClick={() => setSelected(e.key)}>
+              onClick={() => setSelected(e.key)} onMouseEnter={() => setHoverEdge(e.key)} onMouseLeave={() => setHoverEdge(undefined)}>
               <path d={g.d} className="hit" />
               <path d={g.d} className="line" />
+              {(['ab', 'ba'] as const).map((dir) => flow(e)[dir] > 0 && [0, 1, 2].map((i) => (
+                <circle key={dir + i} r={5} className="flow" pointerEvents="none">
+                  {reduceMotion ? null : (
+                    <animateMotion dur="1.8s" begin={`${-i * 0.6}s`} repeatCount="indefinite" path={g.d}
+                      keyPoints={dir === 'ab' ? '0;1' : '1;0'} keyTimes="0;1" calcMode="linear" />
+                  )}
+                </circle>
+              )))}
             </g>
           )
         })}
@@ -204,6 +232,25 @@ export default function NetworkGraph({ selfId, selfName, selfUpSince, sites, lin
             <text textAnchor="middle" y={5} className="initials">{initials(n.name)}</text>
           </g>
         ))}
+        {(() => {
+          // Pointing at a connection: how fast copies move over it now.
+          const e = !hover && hoverEdge ? edges.find((x) => x.key === hoverEdge) : undefined
+          if (!e) return null
+          const f = flow(e)
+          const parts = [
+            f.ab > 0 && `${fmtSpeed(f.ab)} to ${node(e.b)?.name}`,
+            f.ba > 0 && `${fmtSpeed(f.ba)} to ${node(e.a)?.name}`,
+          ].filter(Boolean) as string[]
+          const text = parts.length ? 'Copying ' + parts.join(', ') : kindLabel(e.link)
+          const g = geometry(e)
+          const w = 16 + text.length * 6.8
+          return (
+            <g className="node-tip" transform={`translate(${Math.min(Math.max(g.lx, w / 2 + 2), W - w / 2 - 2)},${Math.max(g.ly - 18, 13)})`} pointerEvents="none">
+              <rect x={-w / 2} y={-12} width={w} height={24} rx={6} />
+              <text textAnchor="middle" y={4}>{text}</text>
+            </g>
+          )
+        })()}
         {(() => {
           // The name of the site or relay under the pointer, above it.
           const n = hover && !hover.startsWith('relay:') ? node(hover) : undefined
@@ -227,6 +274,7 @@ export default function NetworkGraph({ selfId, selfName, selfUpSince, sites, lin
         <span><i className="sw relayed" />Via relay</span>
         <span><i className="sw offline" />Not connected</span>
         <span><i className="sw uplink" />Site to relay</span>
+        {Object.values(rates).some((r) => r.out > 0 || r.in > 0) && <span><i className="sw flow" />Copies on their way</span>}
         <span className="muted">Select a site or connection for details</span>
       </div>
 
@@ -238,6 +286,10 @@ export default function NetworkGraph({ selfId, selfName, selfUpSince, sites, lin
               <span>{kindLabel(selEdge.link)}</span>
               <span>Ping {fmtMs(selEdge.link.rtt_ms)}</span>
               <span>Speed {fmtSpeed(selEdge.link.bps)}</span>
+              {(flow(selEdge).ab > 0 || flow(selEdge).ba > 0) && (
+                <span>Copying now: {[flow(selEdge).ab > 0 && `${fmtSpeed(flow(selEdge).ab)} to ${node(selEdge.b)?.name}`,
+                  flow(selEdge).ba > 0 && `${fmtSpeed(flow(selEdge).ba)} to ${node(selEdge.a)?.name}`].filter(Boolean).join(', ')}</span>
+              )}
               <span className="muted">reported by {node(selEdge.link.from)?.name} {ago(selEdge.link.updated)}</span>
             </>
           )}

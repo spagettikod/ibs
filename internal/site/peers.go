@@ -560,6 +560,9 @@ type PeerInfo struct {
 	Path        PathInfo `json:"path"`
 	Relays      int      `json:"relays"` // relays the site can be reached through
 	Version     string   `json:"version"`
+	// Copy traffic right now, bytes per second: our copies to it, its copies to us.
+	OutBps float64 `json:"out_bps"`
+	InBps  float64 `json:"in_bps"`
 }
 
 func (s *Site) Peers() ([]PeerInfo, error) {
@@ -587,6 +590,7 @@ func (s *Site) Peers() ([]PeerInfo, error) {
 		var rt Routes
 		json.Unmarshal([]byte(routesJSON), &rt)
 		p.Relays = len(rt.Relays)
+		p.OutBps, p.InBps = s.copyRates(p.SiteID)
 		out = append(out, p)
 	}
 	return out, rows.Err()

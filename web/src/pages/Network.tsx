@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, Dashboard, PathInfo, RelayInfo, Settings } from '../api'
+import { ratesOf } from '../NetworkGraph'
 import { NetworkView, useNetworkView, ViewSwitch } from '../GeoMap'
 import { ago, Card, Copy, Empty, ErrorBox, fmtBytes, fmtMs, fmtSpeed, Meter, Modal, shortId, Status, uptime, useLoader, useSubmit, useTick, Version } from '../ui'
 
@@ -76,7 +77,7 @@ export default function NetworkPage() {
       {data && data.network.length > 0 && (
         <Card actions={<ViewSwitch view={view} onChange={setView} />}>
           <NetworkView view={view} self={{ id: data.site.site_id, name: data.site.name, location: data.site.location }}
-            upSince={data.site.up_since} sites={data.network} links={data.links ?? []} relays={data.relay_nodes ?? []} />
+            upSince={data.site.up_since} sites={data.network} links={data.links ?? []} relays={data.relay_nodes ?? []} rates={ratesOf(peers)} />
         </Card>
       )}
 
@@ -106,8 +107,10 @@ export default function NetworkPage() {
                   <td className="num">{p.online ? fmtMs(p.path.rtt_ms) : '—'}</td>
                   <td className="num">{p.online ? fmtSpeed(p.path.bps) : '—'}</td>
                   <Shared capacity={p.capacity} free={p.free} />
-                  <td>{fmtBytes(p.bytes_out)}<div className="muted small">{p.replicas_out} blocks</div></td>
-                  <td>{fmtBytes(p.held_bytes)}<div className="muted small">{p.held_blocks} blocks</div></td>
+                  <td>{fmtBytes(p.bytes_out)}<div className="muted small">{p.replicas_out.toLocaleString()} blocks</div>
+                    {p.out_bps > 0 && <div className="small accent-text">+ {fmtSpeed(p.out_bps)} now</div>}</td>
+                  <td>{fmtBytes(p.held_bytes)}<div className="muted small">{p.held_blocks.toLocaleString()} blocks</div>
+                    {p.in_bps > 0 && <div className="small accent-text">+ {fmtSpeed(p.in_bps)} now</div>}</td>
                 </tr>
               ))}
             </tbody>

@@ -80,6 +80,9 @@ type updateState struct {
 	}
 }
 
+// githubCheckInterval is how often GitHub is asked for a new release.
+const githubCheckInterval = 15 * time.Minute
+
 func (s *Site) store() release.Store { return release.Store{Dir: s.cfg.DataDir} }
 
 // GitHubChecks reports whether this site looks for new versions on GitHub.
@@ -457,7 +460,7 @@ func (s *Site) fetchReleases(ctx context.Context) {
 	}
 	if s.GitHubChecks() {
 		s.updates.mu.Lock()
-		due := time.Since(s.updates.githubChecked) > 6*time.Hour
+		due := time.Since(s.updates.githubChecked) > githubCheckInterval
 		s.updates.mu.Unlock()
 		if due {
 			s.checkGitHub(ctx)

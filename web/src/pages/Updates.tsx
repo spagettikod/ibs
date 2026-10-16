@@ -150,7 +150,7 @@ export default function UpdatesSection() {
             <span>
               Check GitHub for new IBS releases
               <small className="muted">
-                {' '}Every six hours. New versions are downloaded and checked, but only installed when you choose.
+                {' '}Every 15 minutes. New versions are downloaded and checked, then installed when you choose (or automatically, if turned on below).
               </small>
             </span>
           </label>

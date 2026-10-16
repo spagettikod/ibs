@@ -255,6 +255,7 @@ func (s *Site) handlePutHeld(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	s.receivedCopy(owner, len(data))
 	s.notify(TopicReplication)
 	w.WriteHeader(http.StatusNoContent)
 }

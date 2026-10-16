@@ -75,7 +75,9 @@ type Site struct {
 	noRoom  atomic.Int64 // blocks no site had room for at the last replication run
 	// replCursor: the last block of the previous replication batch (replicateOnce only).
 	replCursor string
-	replNoRoom int64 // blocks without room so far in this pass (replicateOnce only)
+	replNoRoom int64    // blocks without room so far in this pass (replicateOnce only)
+	rates      sync.Map // site id -> *peerRates: copy traffic (rates.go)
+	wasMoving  bool     // copies were moving at the last transferEvents
 }
 
 // IsSetUp reports whether the data directory holds an initialized site.
@@ -266,7 +268,27 @@ func (s *Site) Run(ctx context.Context) {
 	every(iv, "nodes", s.refreshLocalNode)
 	every(time.Second, "watch", s.watchState)
 	every(iv, "peers", s.checkPeers)
-	every(iv, "replicate", s.replicateOnce)
+	// Replication: the next batch at once while there is work, else after iv.
+	go func() {
+		for ctx.Err() == nil {
+			more := false
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						s.log.Error("loop panicked", "loop", "replicate", "panic", r)
+					}
+				}()
+				more = s.replicateOnce(ctx)
+			}()
+			if !more {
+				select {
+				case <-ctx.Done():
+				case <-time.After(iv):
+				}
+			}
+		}
+	}()
+	every(2*time.Second, "transfer-events", s.transferEvents)
 	every(iv, "trim", s.trimOnce)
 	every(iv, "gc", s.collectGarbage)
 	every(iv, "heal", s.healOnce)

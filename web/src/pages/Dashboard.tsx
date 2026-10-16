@@ -1,6 +1,7 @@
 import { api, Dashboard, ScrubInfo, TLSStatus, UpdatesInfo } from '../api'
 import { NetworkView, useNetworkView, ViewSwitch } from '../GeoMap'
-import { ago, Card, ErrorBox, fmtBytes, Meter, Stat, uptime, useLoader, useTick } from '../ui'
+import { ratesOf } from '../NetworkGraph'
+import { ago, Card, ErrorBox, fmtBytes, fmtDuration, fmtSpeed, Meter, Stat, uptime, useLoader, useTick } from '../ui'
 import { scrubPercent, scrubResult } from './Scrub'
 
 type Item = { level: 'bad' | 'warn' | 'info'; text: string; href: string; link: string }
@@ -57,6 +58,47 @@ function attention(d: Dashboard, tls?: TLSStatus, updates?: UpdatesInfo, scrub?:
   }
   const rank = { bad: 0, warn: 1, info: 2 }
   return out.sort((a, b) => rank[a.level] - rank[b.level])
+}
+
+/**
+ * Shown while copies are being made or received: where they go, how fast,
+ * what's left and about how long it takes, or why copying waits.
+ */
+function Copying({ d }: { d: Dashboard }) {
+  const r = d.replication
+  const peers = d.peers ?? []
+  const sending = peers.filter((p) => p.out_bps > 0)
+  const receiving = peers.filter((p) => p.in_bps > 0)
+  const out = sending.reduce((n, p) => n + p.out_bps, 0)
+  if (r.copying === 0 && sending.length === 0 && receiving.length === 0) return null
+  const waiting = r.copying > 0 && out === 0
+    ? !peers.some((p) => p.online) ? 'Waiting: no other site is online'
+      : r.no_room > 0 ? 'Waiting: the other sites are full'
+      : 'Starting…'
+    : undefined
+  return (
+    <Card title="Copying">
+      <div className="copying">
+        {r.copying > 0 && (
+          <>
+            <div className="copying-head">
+              <b>{r.copying.toLocaleString()} blocks</b>
+              <span className="muted">{fmtBytes(r.copying_bytes)} left to copy to other sites</span>
+              {out > 0 && <span>{fmtSpeed(out)} · about {fmtDuration(r.copying_bytes / out)} left</span>}
+              {waiting && <span className="warn-text">{waiting}</span>}
+            </div>
+            <Meter used={r.copies_made} total={r.copies_possible} />
+          </>
+        )}
+        {(sending.length > 0 || receiving.length > 0) && (
+          <ul>
+            {sending.map((p) => <li key={'o' + p.site_id}><span className="pulse" />To {p.name}<span className="muted">{fmtSpeed(p.out_bps)}</span></li>)}
+            {receiving.map((p) => <li key={'i' + p.site_id}><span className="pulse" />From {p.name}, its copies<span className="muted">{fmtSpeed(p.in_bps)}</span></li>)}
+          </ul>
+        )}
+      </div>
+    </Card>
+  )
 }
 
 function Health({ items }: { items: Item[] }) {
@@ -116,6 +158,7 @@ export default function DashboardPage() {
       <ErrorBox error={error} />
 
       <Health items={attention(data, tls.data, updates.data, scrub.data)} />
+      <Copying d={data} />
 
       <div className="tiles">
         <Stat label="Your files" value={fmtBytes(site.object_bytes)}
@@ -152,7 +195,7 @@ export default function DashboardPage() {
             <p className="muted small">Not connected to other sites yet.</p>
           ) : (
             <NetworkView compact view={view} self={{ id: site.site_id, name: site.name, location: site.location }}
-              upSince={site.up_since} sites={network} links={data.links ?? []} relays={data.relay_nodes ?? []} />
+              upSince={site.up_since} sites={network} links={data.links ?? []} relays={data.relay_nodes ?? []} rates={ratesOf(data.peers ?? [])} />
           )}
         </Card>
       </div>

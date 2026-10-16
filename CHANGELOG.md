@@ -3,10 +3,19 @@
 Each release says what to update and which launcher and relay it works with: IBS,
 the launcher and the relay are released separately.
 
-## Unreleased
+## 1.5.3
 
+**What to update:** sites, under **Settings → Updates**; nodes follow.
+
+**Works with:** launcher 1.0.0, relay 1.2.0 or newer (1.4.0 for short invite codes).
+
+- **See copies move:** while copies are made, the dashboard shows where they go, how
+  fast, what's left and about how long it takes (or why copying waits). Dots run along
+  the connection in the network diagram, and The Known Universe shows the speed per site.
+- **Faster copying:** four blocks at a time, and no pause between batches.
+- **GitHub is checked for new versions every 15 minutes** (was every six hours).
 - **Copied to other sites** on the dashboard shows progress also when there are fewer
-  sites than copies, and how many blocks are being copied.
+  sites than copies.
 
 ## 1.5.2
 

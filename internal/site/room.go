@@ -274,6 +274,7 @@ func (s *Site) placeReplacement(ctx context.Context, id string, full map[string]
 		if err != nil {
 			continue
 		}
+		s.sentCopy(p.siteID, len(ct))
 		s.DB.Exec(`INSERT INTO replicas(block_id, site_id, state, verified) VALUES(?, ?, 'ok', ?)
 			ON CONFLICT(block_id, site_id) DO UPDATE SET state = 'ok', verified = excluded.verified`,
 			id, p.siteID, time.Now().Unix())
