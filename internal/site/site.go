@@ -78,9 +78,12 @@ type Site struct {
 	noRoom     atomic.Int64 // blocks no site had room for at the last replication run
 	// replCursor: the last block of the previous replication batch (replicateOnce only).
 	replCursor string
-	replNoRoom int64    // blocks without room so far in this pass (replicateOnce only)
-	rates      sync.Map // site id -> *peerRates: copy traffic (rates.go)
-	wasMoving  bool     // copies were moving at the last transferEvents
+	// activeUploads: multipart uploads with a part arriving now (uploadActive).
+	activeMu      sync.Mutex
+	activeUploads map[string]int
+	replNoRoom    int64    // blocks without room so far in this pass (replicateOnce only)
+	rates         sync.Map // site id -> *peerRates: copy traffic (rates.go)
+	wasMoving     bool     // copies were moving at the last transferEvents
 }
 
 // IsSetUp reports whether the data directory holds an initialized site.
@@ -185,6 +188,9 @@ func Open(cfg config.Config) (*Site, error) {
 	s.refreshLocalNode(context.Background())
 	s.writeJoinTokenFile()
 	s.noteDBLevel()
+	// No upload survives a restart: blocks of ones that were in progress are
+	// released, and the garbage collector removes them.
+	d.Exec(`UPDATE blocks SET upload = '' WHERE upload != ''`)
 	return s, nil
 }
 

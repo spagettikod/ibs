@@ -5,6 +5,15 @@ the launcher and the relay are released separately.
 
 ## Unreleased
 
+- **Fix: uploads that took longer than 10 minutes could lose their first blocks.** The
+  upload reported success, but reading the file failed later. Blocks of an upload now
+  belong to it until it finishes, however long it takes, and an upload fails instead of
+  succeeding if a block is missing. A scrub shows whether older files were affected.
+- **IBS no longer deduplicates.** Every file has its own blocks (encrypted with a
+  random nonce), copies included: your backup tool deduplicates already. Deleted or
+  overwritten data is removed here and on the other sites within seconds instead of
+  after 10 minutes. Unfinished multipart uploads are removed when nothing has arrived
+  for them for an hour.
 - **A scrub checks your copies on other sites too.** Each batch of your blocks is
   checked here and, at the same time, on the sites holding copies. They must answer a
   fresh challenge that only the exact same bytes answer, so your site compares the

@@ -1,15 +1,17 @@
 // Package blockcodec encrypts file blocks with a bucket key.
 //
-// Encryption is convergent within a bucket: the GCM nonce is derived from the
-// plaintext, so identical blocks in the same bucket produce identical
-// ciphertext and are stored once. A block's ID is the SHA-256 of its
-// ciphertext, which lets any replica verify a block without knowing the key.
+// Every block gets a random GCM nonce, stored at its start, so no two blocks
+// are alike, even of identical data: each file owns its blocks (IBS doesn't
+// deduplicate; the tool that writes backups into it does). Blocks written
+// before 1.6.0 used a nonce derived from the data; they decrypt the same way.
+// A block's ID is the SHA-256 of its ciphertext, which lets any copy be
+// verified without the key.
 package blockcodec
 
 import (
 	"crypto/aes"
 	"crypto/cipher"
-	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -30,11 +32,10 @@ func Verify(id string, ciphertext []byte) bool {
 
 func Encrypt(key, plain []byte) (id string, ciphertext []byte) {
 	gcm := newGCM(key)
-	nk := hmac.New(sha256.New, key)
-	nk.Write([]byte("ibs/block-nonce/v1"))
-	m := hmac.New(sha256.New, nk.Sum(nil))
-	m.Write(plain)
-	nonce := m.Sum(nil)[:gcm.NonceSize()]
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		panic(err)
+	}
 	ct := gcm.Seal(append([]byte{}, nonce...), nonce, plain, nil)
 	return ID(ct), ct
 }

@@ -4,16 +4,17 @@
 
 # IBS — Intergalactic Backup System
 
-IBS is a cold-storage backup system: it keeps encrypted copies of your backups at other
-sites. You run a **site** yourself, on your own hardware or on a VPS, and it connects to
-sites run by friends, family or your other locations. Together they form "the IBS".
-Every file is kept three times: at your site and on two other sites. None of the sites
-need open ports.
+IBS is S3 storage that works like RAID, with sites instead of disks: every file is kept
+three times, encrypted, at your site and on two other sites, and a damaged copy is
+repaired from another. You run a **site** yourself, on your own hardware or on a VPS,
+and it connects to sites run by friends, family or your other locations. Together they
+form "the IBS". None of the sites need open ports.
 
-S3 is how you put backups in and get them back, so any backup tool that speaks S3
-works. IBS is not general-purpose S3 storage: whenever keeping data safe and fast
-access conflict, IBS chooses safety. Use it for backups and archives you write once and
-rarely read, not as live storage for applications, websites or databases.
+Use it for backups and archives you write once and rarely read, with any backup tool
+that speaks S3. Whenever keeping data safe and fast access conflict, IBS chooses
+safety; it's not live storage for applications, websites or databases. Like RAID, it
+isn't a backup by itself: a deleted or overwritten file is gone everywhere within
+seconds. Versions and deduplication are your backup tool's job.
 
 - **Manager:** each site has one. It serves S3 and a web interface, and keeps the site's
   metadata.
@@ -351,7 +352,8 @@ Environment variables. All are optional.
   site's keys come from it. With the phrase you can rebuild a lost site; without it,
   nobody can, including you. Keep it offline.
 - **Every file exists three times.** One copy at your site and one on each of two other
-  sites, never two on the same site. An upload is confirmed once it's stored at your
+  sites, never two on the same site. Each file has its own blocks; IBS doesn't share
+  blocks between files. An upload is confirmed once it's stored at your
   site, and the copies follow within seconds. The web interface shows what's still being
   copied. With fewer than two other sites online, files get as many copies as there are
   sites, and the rest follow when more sites are available.

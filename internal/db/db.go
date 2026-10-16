@@ -55,7 +55,9 @@ CREATE TABLE IF NOT EXISTS objects (
 );
 
 -- Blocks owned by this site. refs counts objects and multipart parts using
--- the block. node_id is the local node holding it ('' when missing locally).
+-- the block (1 for blocks written since 1.6.0, which aren't shared; more for
+-- older, deduplicated ones). node_id is the local node holding it ('' when
+-- missing locally).
 CREATE TABLE IF NOT EXISTS blocks (
 	id      TEXT PRIMARY KEY,
 	bucket  TEXT NOT NULL,
@@ -296,6 +298,9 @@ var migrations = []string{
 	// Scrubs check the copies of a site's blocks on other sites too.
 	`ALTER TABLE scrubs ADD COLUMN copies INTEGER NOT NULL DEFAULT 0`,
 	`ALTER TABLE scrubs ADD COLUMN copy_bytes INTEGER NOT NULL DEFAULT 0`,
+	// The upload in progress a block belongs to until it's committed ('' = none):
+	// the garbage collector leaves those alone, however long the upload takes.
+	`ALTER TABLE blocks ADD COLUMN upload TEXT NOT NULL DEFAULT ''`,
 }
 
 func Open(path string) (*sql.DB, error) {

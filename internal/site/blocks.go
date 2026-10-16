@@ -10,18 +10,18 @@ import (
 	"ibs/internal/blockstore"
 )
 
-// storeBlock makes sure an encrypted block of a bucket is present on a local
-// node. The block row is touched so the garbage collector leaves it alone
-// until an object commit takes a reference on it.
-func (s *Site) storeBlock(ctx context.Context, bucket, id string, ct []byte) error {
+// storeBlock stores an encrypted block of a bucket on a local node, as part
+// of the upload in progress (upload): until the upload commits it, the
+// garbage collector leaves it alone, however long the upload takes.
+func (s *Site) storeBlock(ctx context.Context, bucket, upload, id string, ct []byte) error {
 	unlock := s.lockBlock(id)
 	defer unlock()
 	now := time.Now().Unix()
 	var nodeID string
-	err := s.DB.QueryRowContext(ctx, `INSERT INTO blocks(id, bucket, size, refs, node_id, touched, verified)
-		VALUES(?, ?, ?, 0, '', ?, ?)
-		ON CONFLICT(id) DO UPDATE SET touched = excluded.touched
-		RETURNING node_id`, id, bucket, len(ct), now, now).Scan(&nodeID)
+	err := s.DB.QueryRowContext(ctx, `INSERT INTO blocks(id, bucket, size, refs, node_id, touched, verified, upload)
+		VALUES(?, ?, ?, 0, '', ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET touched = excluded.touched, upload = CASE WHEN refs <= 0 THEN excluded.upload ELSE upload END
+		RETURNING node_id`, id, bucket, len(ct), now, now, upload).Scan(&nodeID)
 	if err != nil {
 		return err
 	}

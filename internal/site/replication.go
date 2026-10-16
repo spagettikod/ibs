@@ -18,9 +18,9 @@ import (
 )
 
 const (
-	gcGrace          = 10 * time.Minute // unreferenced blocks younger than this are kept
-	replicateBatch   = 256              // blocks looked up at a time
-	replicateWorkers = 4                // blocks copied at the same time
+	staleUpload      = time.Hour // unfinished multipart uploads with nothing arriving for this long are removed
+	replicateBatch   = 256       // blocks looked up at a time
+	replicateWorkers = 4         // blocks copied at the same time
 )
 
 type peerCandidate struct {
@@ -261,11 +261,13 @@ func (s *Site) onlinePeers() []peerCandidate {
 	return out
 }
 
-// collectGarbage deletes blocks no object or part references any more,
-// locally and on peers.
+// collectGarbage deletes blocks no file or multipart part uses any more, and
+// that no upload in progress is writing, here and on other sites: at once,
+// like a disk. Unfinished multipart uploads that got nothing for an hour are
+// removed first.
 func (s *Site) collectGarbage(ctx context.Context) {
-	cutoff := time.Now().Add(-gcGrace).Unix()
-	rows, err := s.DB.Query(`SELECT id FROM blocks WHERE refs <= 0 AND touched < ? LIMIT 500`, cutoff)
+	s.removeStaleUploads()
+	rows, err := s.DB.Query(`SELECT id FROM blocks WHERE refs <= 0 AND upload = '' LIMIT 500`)
 	if err != nil {
 		return
 	}
@@ -277,7 +279,7 @@ func (s *Site) collectGarbage(ctx context.Context) {
 	}
 	rows.Close()
 	for _, id := range ids {
-		s.deleteBlock(ctx, id, cutoff)
+		s.deleteBlock(ctx, id)
 	}
 	if len(ids) > 0 {
 		s.notify(TopicReplication)
@@ -309,7 +311,7 @@ func (s *Site) collectGarbage(ctx context.Context) {
 	}
 }
 
-func (s *Site) deleteBlock(ctx context.Context, id string, cutoff int64) {
+func (s *Site) deleteBlock(ctx context.Context, id string) {
 	unlock := s.lockBlock(id)
 	defer unlock()
 	var nodeID string
@@ -318,7 +320,7 @@ func (s *Site) deleteBlock(ctx context.Context, id string, cutoff int64) {
 		return
 	}
 	defer tx.Rollback()
-	err = tx.QueryRow(`DELETE FROM blocks WHERE id = ? AND refs <= 0 AND touched < ? RETURNING node_id`, id, cutoff).Scan(&nodeID)
+	err = tx.QueryRow(`DELETE FROM blocks WHERE id = ? AND refs <= 0 AND upload = '' RETURNING node_id`, id).Scan(&nodeID)
 	if err != nil {
 		return // referenced again or already gone
 	}

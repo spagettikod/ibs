@@ -214,6 +214,7 @@ func (s *Site) bucketKey(name string) ([]byte, error) {
 // ---- Writing ----
 
 type writeResult struct {
+	upload string // the blocks belong to it until committed
 	blocks []BlockRef
 	size   int64
 	md5    []byte
@@ -221,21 +222,31 @@ type writeResult struct {
 
 // writeBlocks splits a stream into blocks, encrypts them and stores them
 // locally. The blocks are unreferenced until the caller commits them.
-func (s *Site) writeBlocks(ctx context.Context, bucket string, r io.Reader) (*writeResult, error) {
+//
+// The blocks belong to the upload (res.upload) until they're committed with
+// commitBlocks or given up with releaseUpload; on an error they're given up
+// here.
+func (s *Site) writeBlocks(ctx context.Context, bucket string, r io.Reader) (res *writeResult, err error) {
 	key, err := s.bucketKey(bucket)
 	if err != nil {
 		return nil, err
 	}
 	h := md5.New()
 	buf := make([]byte, blockcodec.BlockSize)
-	res := &writeResult{}
+	upload := keys.RandomToken(12)
+	res = &writeResult{upload: upload}
+	defer func() {
+		if err != nil {
+			s.releaseUpload(upload)
+		}
+	}()
 	for {
 		n, err := io.ReadFull(r, buf)
 		if n > 0 {
 			plain := buf[:n]
 			h.Write(plain)
 			id, ct := blockcodec.Encrypt(key, plain)
-			if err := s.storeBlock(ctx, bucket, id, ct); err != nil {
+			if err := s.storeBlock(ctx, bucket, res.upload, id, ct); err != nil {
 				return nil, fmt.Errorf("store block: %w", err)
 			}
 			res.blocks = append(res.blocks, BlockRef{ID: id, Size: int64(n)})
@@ -252,14 +263,30 @@ func (s *Site) writeBlocks(ctx context.Context, bucket string, r io.Reader) (*wr
 	return res, nil
 }
 
+// errBlockGone means a block an upload wrote isn't there any more; the upload
+// fails rather than store a file with a hole in it.
+var errBlockGone = errors.New("a block of this upload is missing; nothing was stored, try again")
+
+// adjustRefs adds delta references to blocks. Taking a reference (delta > 0)
+// also ends the blocks' upload, and requires every block to exist.
 func adjustRefs(tx *sql.Tx, blocks []BlockRef, delta int) error {
 	for _, b := range blocks {
-		if _, err := tx.Exec(`UPDATE blocks SET refs = refs + ?, touched = ? WHERE id = ?`,
-			delta, time.Now().Unix(), b.ID); err != nil {
+		res, err := tx.Exec(`UPDATE blocks SET refs = refs + ?, upload = CASE WHEN ? > 0 THEN '' ELSE upload END WHERE id = ?`,
+			delta, delta, b.ID)
+		if err != nil {
 			return err
+		}
+		if n, _ := res.RowsAffected(); n == 0 && delta > 0 {
+			return errBlockGone
 		}
 	}
 	return nil
+}
+
+// releaseUpload gives up the blocks of an upload that didn't commit; the
+// garbage collector deletes them.
+func (s *Site) releaseUpload(upload string) {
+	s.DB.Exec(`UPDATE blocks SET upload = '' WHERE upload = ?`, upload)
 }
 
 func encodeBlocks(b []BlockRef) string {
@@ -341,6 +368,7 @@ func (s *Site) PutObject(ctx context.Context, bucket, key string, r io.Reader, c
 		ContentType: contentType, Modified: time.Now().UTC().Truncate(time.Millisecond), Meta: meta, Blocks: wr.blocks,
 	}
 	if err := s.inTx(func(tx *sql.Tx) error { return s.commitObject(tx, o) }); err != nil {
+		s.releaseUpload(wr.upload)
 		return nil, err
 	}
 	return o, nil
@@ -366,8 +394,8 @@ func (s *Site) DeleteObject(bucket, key string) error {
 	})
 }
 
-// CopyObject copies an object. Within a bucket the blocks are shared; across
-// buckets the data is re-encrypted with the destination bucket's key.
+// CopyObject copies an object: its data is written again as new blocks, so
+// each file owns its blocks, as on a disk.
 func (s *Site) CopyObject(ctx context.Context, srcBucket, srcKey, dstBucket, dstKey string, replaceMeta bool, contentType string, meta map[string]string) (*ObjectInfo, error) {
 	src, err := s.HeadObject(srcBucket, srcKey)
 	if err != nil {
@@ -382,21 +410,11 @@ func (s *Site) CopyObject(ctx context.Context, srcBucket, srcKey, dstBucket, dst
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
-	if srcBucket != dstBucket {
-		pr, pw := io.Pipe()
-		go func() { pw.CloseWithError(s.WriteObject(ctx, pw, src, 0, src.Size)) }()
-		o, err := s.PutObject(ctx, dstBucket, dstKey, pr, contentType, meta)
-		pr.CloseWithError(err)
-		return o, err
-	}
-	o := &ObjectInfo{
-		Bucket: dstBucket, Key: dstKey, Size: src.Size, ETag: src.ETag, ContentType: contentType,
-		Modified: time.Now().UTC().Truncate(time.Millisecond), Meta: meta, Blocks: src.Blocks,
-	}
-	if err := s.inTx(func(tx *sql.Tx) error { return s.commitObject(tx, o) }); err != nil {
-		return nil, err
-	}
-	return o, nil
+	pr, pw := io.Pipe()
+	go func() { pw.CloseWithError(s.WriteObject(ctx, pw, src, 0, src.Size)) }()
+	o, err := s.PutObject(ctx, dstBucket, dstKey, pr, contentType, meta)
+	pr.CloseWithError(err)
+	return o, err
 }
 
 // ---- Reading ----
@@ -642,6 +660,8 @@ func (s *Site) UploadPart(ctx context.Context, bucket, key, uploadID string, num
 	if err := s.uploadBucket(uploadID, bucket, key); err != nil {
 		return "", err
 	}
+	s.uploadActive(uploadID, 1)
+	defer s.uploadActive(uploadID, -1)
 	wr, err := s.writeBlocks(ctx, bucket, r)
 	if err != nil {
 		return "", err
@@ -674,6 +694,9 @@ func (s *Site) UploadPart(ctx context.Context, bucket, key, uploadID string, num
 			uploadID, num, etag, wr.size, encodeBlocks(wr.blocks), time.Now().UnixMilli())
 		return err
 	})
+	if err != nil {
+		s.releaseUpload(wr.upload)
+	}
 	return etag, err
 }
 
@@ -812,6 +835,48 @@ func (s *Site) AbortUpload(bucket, key, uploadID string) error {
 		_, err = tx.Exec(`DELETE FROM uploads WHERE id = ?`, uploadID)
 		return err
 	})
+}
+
+// uploadActive counts parts of a multipart upload that are arriving now.
+func (s *Site) uploadActive(id string, delta int) {
+	s.activeMu.Lock()
+	defer s.activeMu.Unlock()
+	if s.activeUploads == nil {
+		s.activeUploads = map[string]int{}
+	}
+	if s.activeUploads[id] += delta; s.activeUploads[id] <= 0 {
+		delete(s.activeUploads, id)
+	}
+}
+
+// removeStaleUploads aborts unfinished multipart uploads that got nothing for
+// staleUpload: no part finished, and none arriving. The client that started
+// them gave up; their parts would take space nobody sees. Tools start such a
+// file over rather than continue it.
+func (s *Site) removeStaleUploads() {
+	cutoff := time.Now().Add(-staleUpload)
+	rows, err := s.DB.Query(`SELECT u.id, u.bucket, u.key FROM uploads u
+		WHERE u.created < ? AND COALESCE((SELECT MAX(modified) FROM parts p WHERE p.upload_id = u.id), 0) < ?`,
+		cutoff.Unix(), cutoff.UnixMilli())
+	if err != nil {
+		return
+	}
+	type up struct{ id, bucket, key string }
+	var stale []up
+	for rows.Next() {
+		var u up
+		rows.Scan(&u.id, &u.bucket, &u.key)
+		stale = append(stale, u)
+	}
+	rows.Close()
+	for _, u := range stale {
+		s.activeMu.Lock()
+		busy := s.activeUploads[u.id] > 0
+		s.activeMu.Unlock()
+		if !busy && s.AbortUpload(u.bucket, u.key, u.id) == nil {
+			s.log.Info("removed an unfinished upload: nothing arrived for an hour", "bucket", u.bucket, "key", u.key)
+		}
+	}
 }
 
 func (s *Site) ListUploads(bucket, prefix string) ([]UploadInfo, error) {

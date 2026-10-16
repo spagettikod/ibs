@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 	"sync"
@@ -95,17 +97,139 @@ func TestPutGetOverwriteDelete(t *testing.T) {
 	}
 }
 
-func TestDedupWithinBucket(t *testing.T) {
+// Each file owns its blocks: identical data doesn't share blocks, and a copy
+// gets new ones. Deleting a file frees its blocks at once.
+func TestFilesOwnTheirBlocks(t *testing.T) {
 	s := newTestSite(t)
 	ctx := context.Background()
-	s.CreateBucket("dedup")
+	s.CreateBucket("owned")
 	data := bytes.Repeat([]byte("x"), 1000)
-	s.PutObject(ctx, "dedup", "one", bytes.NewReader(data), "", nil)
-	s.PutObject(ctx, "dedup", "two", bytes.NewReader(data), "", nil)
+	s.PutObject(ctx, "owned", "one", bytes.NewReader(data), "", nil)
+	s.PutObject(ctx, "owned", "two", bytes.NewReader(data), "", nil)
+	if _, err := s.CopyObject(ctx, "owned", "one", "owned", "three", false, "", nil); err != nil {
+		t.Fatal(err)
+	}
 	var blocks, refs int
 	s.DB.QueryRow(`SELECT COUNT(*), SUM(refs) FROM blocks`).Scan(&blocks, &refs)
-	if blocks != 1 || refs != 2 {
-		t.Fatalf("expected 1 shared block with 2 refs, got %d blocks %d refs", blocks, refs)
+	if blocks != 3 || refs != 3 {
+		t.Fatalf("%d blocks, %d refs; want 3 blocks of one file each", blocks, refs)
+	}
+	var out bytes.Buffer
+	o, _ := s.HeadObject("owned", "three")
+	if err := s.WriteObject(ctx, &out, o, 0, o.Size); err != nil || !bytes.Equal(out.Bytes(), data) {
+		t.Fatalf("copy reads back wrong: %v", err)
+	}
+	s.DeleteObject("owned", "one")
+	s.collectGarbage(ctx)
+	s.DB.QueryRow(`SELECT COUNT(*) FROM blocks`).Scan(&blocks)
+	if blocks != 2 {
+		t.Fatalf("%d blocks after deleting a file and collecting; want 2, at once", blocks)
+	}
+}
+
+// Blocks of an upload in progress are kept however long it takes; an upload
+// whose block went missing fails instead of storing a broken file; a restart
+// releases blocks of uploads that were in progress.
+func TestUploadsOwnTheirBlocks(t *testing.T) {
+	s := newTestSite(t)
+	ctx := context.Background()
+	s.CreateBucket("uploads")
+	// An upload that is still sending: its first block was written long ago.
+	pr, pw := io.Pipe()
+	done := make(chan error, 1)
+	go func() {
+		_, err := s.PutObject(ctx, "uploads", "slow", pr, "", nil)
+		pr.CloseWithError(err)
+		done <- err
+	}()
+	if _, err := pw.Write(bytes.Repeat([]byte("a"), blockcodec.BlockSize)); err != nil {
+		t.Fatalf("upload stopped: %v", <-done)
+	}
+	for {
+		var n int
+		s.DB.QueryRow(`SELECT COUNT(*) FROM blocks WHERE upload != ''`).Scan(&n)
+		if n == 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	s.DB.Exec(`UPDATE blocks SET touched = 0`) // as if written an hour ago
+	s.collectGarbage(ctx)
+	pw.Write([]byte("end"))
+	pw.Close()
+	if err := <-done; err != nil {
+		t.Fatalf("a long upload failed: %v", err)
+	}
+	o, _ := s.HeadObject("uploads", "slow")
+	if err := s.WriteObject(ctx, io.Discard, o, 0, o.Size); err != nil {
+		t.Fatalf("a long upload lost a block: %v", err)
+	}
+
+	// A block gone before the commit: the upload fails, nothing is stored.
+	wr, err := s.writeBlocks(ctx, "uploads", strings.NewReader("doomed"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.DB.Exec(`DELETE FROM blocks WHERE id = ?`, wr.blocks[0].ID)
+	err = s.inTx(func(tx *sql.Tx) error {
+		return s.commitObject(tx, &ObjectInfo{Bucket: "uploads", Key: "doomed", Blocks: wr.blocks, Modified: time.Now()})
+	})
+	if !errors.Is(err, errBlockGone) {
+		t.Fatalf("commit with a missing block: %v", err)
+	}
+	if _, err := s.HeadObject("uploads", "doomed"); err != ErrNoSuchKey {
+		t.Fatalf("a broken file was stored: %v", err)
+	}
+
+	// Blocks of an upload interrupted by a restart are released and collected.
+	wr, _ = s.writeBlocks(ctx, "uploads", strings.NewReader("interrupted"))
+	s.Close()
+	s2, err := Open(s.cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Close()
+	s2.collectGarbage(ctx)
+	var n int
+	s2.DB.QueryRow(`SELECT COUNT(*) FROM blocks WHERE id = ?`, wr.blocks[0].ID).Scan(&n)
+	if n != 0 {
+		t.Fatal("the block of an interrupted upload is still there after a restart")
+	}
+}
+
+// An unfinished multipart upload is removed an hour after anything last
+// arrived for it, and not while a part is still arriving.
+func TestStaleUploads(t *testing.T) {
+	s := newTestSite(t)
+	ctx := context.Background()
+	s.CreateBucket("multipart")
+	old, _ := s.CreateUpload("multipart", "old", "", nil)
+	s.UploadPart(ctx, "multipart", "old", old, 1, strings.NewReader("part"))
+	recent, _ := s.CreateUpload("multipart", "recent", "", nil)
+	s.UploadPart(ctx, "multipart", "recent", recent, 1, strings.NewReader("part"))
+	day := time.Now().Add(-2 * time.Hour)
+	if _, err := s.DB.Exec(`UPDATE uploads SET created = ?`, day.Unix()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.Exec(`UPDATE parts SET modified = ? WHERE upload_id = ?`, day.UnixMilli(), old); err != nil {
+		t.Fatal(err)
+	}
+	// A part of the old upload is still arriving: it stays.
+	s.uploadActive(old, 1)
+	s.collectGarbage(ctx)
+	if ups, _ := s.ListUploads("multipart", ""); len(ups) != 2 {
+		t.Fatalf("%d uploads left; one receiving a part must stay", len(ups))
+	}
+	s.uploadActive(old, -1)
+	s.collectGarbage(ctx)
+	ups, _ := s.ListUploads("multipart", "")
+	if len(ups) != 1 || ups[0].ID != recent {
+		t.Fatalf("uploads left: %+v; want only the one with a recent part", ups)
+	}
+	var blocks int
+	s.DB.QueryRow(`SELECT COUNT(*) FROM blocks`).Scan(&blocks)
+	if blocks != 1 {
+		t.Fatalf("%d blocks; the stale upload's part should be gone", blocks)
 	}
 }
 
@@ -436,7 +560,7 @@ func TestNodeQuotaConcurrentWrites(t *testing.T) {
 			data := make([]byte, 1<<20)
 			rand.Read(data)
 			id, ct := blockcodec.Encrypt(keys.RandomKey(), data)
-			if s.storeBlock(ctx, "quota", id, ct) == nil {
+			if s.storeBlock(ctx, "quota", "up", id, ct) == nil {
 				stored.Add(1)
 			}
 		}()
