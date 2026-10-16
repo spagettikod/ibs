@@ -3,6 +3,11 @@
 Each release says what to update and which launcher and relay it works with: IBS,
 the launcher and the relay are released separately.
 
+## Unreleased
+
+- The dashboard's replication tile says how many copies each file has on other sites,
+  e.g. "1 of 2 per file; the next needs another site".
+
 ## 1.5.3
 
 **What to update:** sites, under **Settings → Updates**; nodes follow.

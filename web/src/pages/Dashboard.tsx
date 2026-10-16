@@ -146,6 +146,9 @@ export default function DashboardPage() {
   // Of the copies the other sites can take now: with fewer sites than copies,
   // the rest wait for another site (the health list says so).
   const copied = r.copies_possible === 0 ? 100 : Math.floor((100 * r.copies_made) / r.copies_possible)
+  // Copies per file on other sites: wanted, and what the online sites allow.
+  const want = data.ibs_capacity.copies
+  const have = Math.min(data.ibs_capacity.sites, want)
 
   return (
     <div className="page">
@@ -163,11 +166,12 @@ export default function DashboardPage() {
       <div className="tiles">
         <Stat label="Your files" value={fmtBytes(site.object_bytes)}
           sub={`${site.objects} ${site.objects === 1 ? 'object' : 'objects'} in ${site.buckets} ${site.buckets === 1 ? 'bucket' : 'buckets'}`} />
-        <Stat label="Copied to other sites" value={`${copied}%`}
+        <Stat label="Copies on other sites" value={r.copying > 0 ? `${copied}%` : `${have} of ${want}`}
           tone={r.under_replicated === 0 ? 'ok' : 'warn'}
-          sub={r.copying > 0 ? `${r.copying.toLocaleString()} blocks being copied`
-            : r.under_replicated > 0 ? `${r.under_replicated.toLocaleString()} blocks wait for another site`
-            : 'All copies in place'} />
+          sub={r.copying > 0 ? `copying, ${r.copying.toLocaleString()} blocks left`
+            : r.under_replicated > 0 && have < want ? `per file; the next needs ${want - have === 1 ? 'another site' : 'more sites'}`
+            : r.under_replicated > 0 ? `per file; ${r.under_replicated.toLocaleString()} blocks wait for room`
+            : 'per file, all in place'} />
         <Stat label="Storage" value={`${fmtBytes(site.free)} free`}
           sub={<><Meter used={used} total={site.capacity} />{fmtBytes(used)} of {fmtBytes(site.capacity)} used
             {site.held_bytes > 0 ? `, ${fmtBytes(site.held_bytes)} of it other sites' copies` : ''}</>} />
