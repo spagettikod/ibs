@@ -11,10 +11,12 @@ and it connects to sites run by friends, family or your other locations. Togethe
 form "the IBS". None of the sites need open ports.
 
 Use it for backups and archives you write once and rarely read, with any backup tool
-that speaks S3. Whenever keeping data safe and fast access conflict, IBS chooses
-safety; it's not live storage for applications, websites or databases. Like RAID, it
-isn't a backup by itself: a deleted or overwritten file is gone everywhere within
-seconds. Versions and deduplication are your backup tool's job.
+that speaks S3: your data gets off-site copies without renting storage. Whenever keeping
+data safe and fast access conflict, IBS chooses safety; it's not live storage for
+applications, websites or databases.
+
+You don't give your storage away: other sites' copies only use space you aren't using,
+and they make way as soon as your own files need it (see [Disk space](#disk-space)).
 
 - **Manager:** each site has one. It serves S3 and a web interface, and keeps the site's
   metadata.
@@ -386,9 +388,13 @@ Environment variables. All are optional.
 
 ## Disk space
 
+**Your storage stays yours.** Other sites' copies only borrow space you aren't using; when
+your own files need it, the copies move away. You never have to set aside space for
+others.
+
 Your site's storage is what its nodes' limits allow (**Nodes → Change**, or
 `IBS_STORAGE_LIMIT`). It holds your own files and the copies your site keeps for other
-sites. Your own files come first:
+sites:
 
 - **Other sites' copies use free space, not your space.** They may fill any free space
   except a small margin (5% of your storage, at most 1 GB), so your uploads always have
