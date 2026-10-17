@@ -29,32 +29,31 @@ func TestUpdates(t *testing.T) {
 	if err := upload("9.0.0", db.Level); err != nil {
 		t.Fatal(err)
 	}
-	if err := upload("0.9.0", db.Level-1); err != nil {
+	// An older version from before a change that breaks it can never run
+	// here: it isn't kept.
+	if err := upload("0.9.0", db.Level-1); err == nil || !strings.Contains(err.Error(), "database") {
+		t.Fatalf("kept a version that can't run on this database: %v", err)
+	}
+	// An older version that knows every change that matters can be gone back to.
+	if err := upload("0.9.5", db.Level); err != nil {
 		t.Fatal(err)
 	}
 	u := s.Updates()
 	if len(u.Versions) != 2 || u.Newer != "9.0.0" || u.Versions[0].KeyName != "mine" || len(u.Keys) != 2 {
 		t.Fatalf("updates: %+v", u)
 	}
-	// An older version that doesn't know this database's changes is blocked.
-	if !strings.Contains(u.Versions[1].Blocker, "database") {
-		t.Fatalf("0.9.0 should be blocked by the database level: %+v", u.Versions[1])
-	}
-	if u.Versions[0].Blocker != "" {
-		t.Fatalf("9.0.0 should be allowed: %q", u.Versions[0].Blocker)
+	if u.Versions[0].Blocker != "" || u.Versions[1].Blocker != "" {
+		t.Fatalf("9.0.0 and 0.9.5 should be allowed: %q, %q", u.Versions[0].Blocker, u.Versions[1].Blocker)
 	}
 	// Switching versions needs the launcher.
 	if err := s.Install("9.0.0"); err == nil {
 		t.Fatal("installed without the launcher")
 	}
 	t.Setenv("IBS_LAUNCHER", "1")
-	if err := s.Install("0.9.0"); err == nil || !strings.Contains(err.Error(), "database") {
-		t.Fatalf("rollback past the database level: %v", err)
-	}
 	if err := s.Install(version.Version); err == nil {
 		t.Fatal("installed the running version again")
 	}
-	if err := s.RemoveVersion("0.9.0"); err != nil || len(s.Updates().Versions) != 1 {
+	if err := s.RemoveVersion("0.9.5"); err != nil || len(s.Updates().Versions) != 1 {
 		t.Fatalf("remove: %v", err)
 	}
 	if err := s.RemoveReleaseKey(release.DefaultKey.ID); err == nil {

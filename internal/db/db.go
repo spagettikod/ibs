@@ -257,53 +257,77 @@ CREATE TABLE IF NOT EXISTS invite_codes (
 // by a newer version (a higher level) can't be used by an older one.
 var Level = len(migrations)
 
-var migrations = []string{
-	`ALTER TABLE nodes ADD COLUMN quota INTEGER NOT NULL DEFAULT 0`,
-	`ALTER TABLE nodes ADD COLUMN disk_capacity INTEGER NOT NULL DEFAULT 0`,
-	`ALTER TABLE nodes ADD COLUMN disk_free INTEGER NOT NULL DEFAULT 0`,
-	`ALTER TABLE nodes ADD COLUMN pubkey BLOB NOT NULL DEFAULT x''`,
-	`ALTER TABLE peers ADD COLUMN routes TEXT NOT NULL DEFAULT '{}'`,
+// migration is a change to the database after the first release. Breaks says
+// why versions from before it must not run on a database it changed (they'd
+// misread it); "" when older versions simply don't notice it, like a column
+// they ignore, so a site can still go back to them.
+type migration struct {
+	SQL    string
+	Breaks string
+}
+
+// limitedKeys: an older version would ignore an access key's limits.
+const limitedKeys = "limited access keys, which an older version would give full access"
+
+var migrations = []migration{
+	{SQL: `ALTER TABLE nodes ADD COLUMN quota INTEGER NOT NULL DEFAULT 0`},
+	{SQL: `ALTER TABLE nodes ADD COLUMN disk_capacity INTEGER NOT NULL DEFAULT 0`},
+	{SQL: `ALTER TABLE nodes ADD COLUMN disk_free INTEGER NOT NULL DEFAULT 0`},
+	{SQL: `ALTER TABLE nodes ADD COLUMN pubkey BLOB NOT NULL DEFAULT x''`},
+	{SQL: `ALTER TABLE peers ADD COLUMN routes TEXT NOT NULL DEFAULT '{}'`},
 	// Storage limits: env_limit is IBS_STORAGE_LIMIT as the node reports it (0 = not set),
 	// ui_limit the one set in the web interface (NULL = not set). quota is the one in effect.
-	`ALTER TABLE nodes ADD COLUMN env_limit INTEGER NOT NULL DEFAULT 0`,
-	`ALTER TABLE nodes ADD COLUMN ui_limit INTEGER`,
+	{SQL: `ALTER TABLE nodes ADD COLUMN env_limit INTEGER NOT NULL DEFAULT 0`},
+	{SQL: `ALTER TABLE nodes ADD COLUMN ui_limit INTEGER`},
 	// IBS membership: what a site needs to connect to another member of the IBS.
-	`ALTER TABLE network ADD COLUMN pubkey BLOB NOT NULL DEFAULT x''`,
-	`ALTER TABLE network ADD COLUMN address TEXT NOT NULL DEFAULT ''`,
-	`ALTER TABLE network ADD COLUMN relay_tokens TEXT NOT NULL DEFAULT '[]'`,
-	`ALTER TABLE peers ADD COLUMN relay_tokens TEXT NOT NULL DEFAULT '[]'`,
-	`ALTER TABLE peers ADD COLUMN joined INTEGER NOT NULL DEFAULT 0`,
-	`ALTER TABLE network ADD COLUMN joined INTEGER NOT NULL DEFAULT 0`,
+	{SQL: `ALTER TABLE network ADD COLUMN pubkey BLOB NOT NULL DEFAULT x''`},
+	{SQL: `ALTER TABLE network ADD COLUMN address TEXT NOT NULL DEFAULT ''`},
+	{SQL: `ALTER TABLE network ADD COLUMN relay_tokens TEXT NOT NULL DEFAULT '[]'`},
+	{SQL: `ALTER TABLE peers ADD COLUMN relay_tokens TEXT NOT NULL DEFAULT '[]'`},
+	{SQL: `ALTER TABLE peers ADD COLUMN joined INTEGER NOT NULL DEFAULT 0`},
+	{SQL: `ALTER TABLE network ADD COLUMN joined INTEGER NOT NULL DEFAULT 0`},
 	// Where sites are shown on the map (JSON, '' = none).
-	`ALTER TABLE peers ADD COLUMN location TEXT NOT NULL DEFAULT ''`,
-	`ALTER TABLE network ADD COLUMN location TEXT NOT NULL DEFAULT ''`,
+	{SQL: `ALTER TABLE peers ADD COLUMN location TEXT NOT NULL DEFAULT ''`},
+	{SQL: `ALTER TABLE network ADD COLUMN location TEXT NOT NULL DEFAULT ''`},
 	// Every file is kept on two other sites (site.Copies); buckets once had their own count.
-	`UPDATE buckets SET replication = 2 WHERE replication != 2`,
+	{SQL: `UPDATE buckets SET replication = 2 WHERE replication != 2`},
 	// The version each node and site runs, as it reports it.
-	`ALTER TABLE nodes ADD COLUMN version TEXT NOT NULL DEFAULT ''`,
-	`ALTER TABLE peers ADD COLUMN version TEXT NOT NULL DEFAULT ''`,
-	`ALTER TABLE network ADD COLUMN version TEXT NOT NULL DEFAULT ''`,
+	{SQL: `ALTER TABLE nodes ADD COLUMN version TEXT NOT NULL DEFAULT ''`},
+	{SQL: `ALTER TABLE peers ADD COLUMN version TEXT NOT NULL DEFAULT ''`},
+	{SQL: `ALTER TABLE network ADD COLUMN version TEXT NOT NULL DEFAULT ''`},
 	// Updates: the versions each connected site holds, and the oldest version
 	// each site works with.
-	`ALTER TABLE peers ADD COLUMN releases TEXT NOT NULL DEFAULT '[]'`,
-	`ALTER TABLE peers ADD COLUMN min_compatible TEXT NOT NULL DEFAULT ''`,
-	`ALTER TABLE network ADD COLUMN min_compatible TEXT NOT NULL DEFAULT ''`,
+	{SQL: `ALTER TABLE peers ADD COLUMN releases TEXT NOT NULL DEFAULT '[]'`},
+	{SQL: `ALTER TABLE peers ADD COLUMN min_compatible TEXT NOT NULL DEFAULT ''`},
+	{SQL: `ALTER TABLE network ADD COLUMN min_compatible TEXT NOT NULL DEFAULT ''`},
 	// Relay renames: when a relay's address was set by hand (0 = never), here
 	// and as each connected site reports it, so the newest address spreads.
-	`ALTER TABLE relays ADD COLUMN address_set INTEGER NOT NULL DEFAULT 0`,
-	`ALTER TABLE peers ADD COLUMN relay_addresses TEXT NOT NULL DEFAULT '[]'`,
-	`ALTER TABLE peers ADD COLUMN relay_removals TEXT NOT NULL DEFAULT '[]'`,
+	{SQL: `ALTER TABLE relays ADD COLUMN address_set INTEGER NOT NULL DEFAULT 0`},
+	{SQL: `ALTER TABLE peers ADD COLUMN relay_addresses TEXT NOT NULL DEFAULT '[]'`},
+	{SQL: `ALTER TABLE peers ADD COLUMN relay_removals TEXT NOT NULL DEFAULT '[]'`},
 	// Scrubs check the copies of a site's blocks on other sites too.
-	`ALTER TABLE scrubs ADD COLUMN copies INTEGER NOT NULL DEFAULT 0`,
-	`ALTER TABLE scrubs ADD COLUMN copy_bytes INTEGER NOT NULL DEFAULT 0`,
+	{SQL: `ALTER TABLE scrubs ADD COLUMN copies INTEGER NOT NULL DEFAULT 0`},
+	{SQL: `ALTER TABLE scrubs ADD COLUMN copy_bytes INTEGER NOT NULL DEFAULT 0`},
 	// The upload in progress a block belongs to until it's committed ('' = none):
 	// the garbage collector leaves those alone, however long the upload takes.
-	`ALTER TABLE blocks ADD COLUMN upload TEXT NOT NULL DEFAULT ''`,
+	{SQL: `ALTER TABLE blocks ADD COLUMN upload TEXT NOT NULL DEFAULT ''`},
 	// Copies a finished scrub couldn't check: their site was down to the end.
-	`ALTER TABLE scrubs ADD COLUMN unchecked INTEGER NOT NULL DEFAULT 0`,
+	{SQL: `ALTER TABLE scrubs ADD COLUMN unchecked INTEGER NOT NULL DEFAULT 0`},
 	// Access key permissions: full | read, and the buckets ('' = all; else a JSON list).
-	`ALTER TABLE access_keys ADD COLUMN access TEXT NOT NULL DEFAULT 'full'`,
-	`ALTER TABLE access_keys ADD COLUMN buckets TEXT NOT NULL DEFAULT ''`,
+	{SQL: `ALTER TABLE access_keys ADD COLUMN access TEXT NOT NULL DEFAULT 'full'`, Breaks: limitedKeys},
+	{SQL: `ALTER TABLE access_keys ADD COLUMN buckets TEXT NOT NULL DEFAULT ''`, Breaks: limitedKeys},
+}
+
+// BreakingSince says why a version that knows the first known changes can't
+// run on a database changed up to level: the first change in between that
+// older versions must not run after, or "" when there is none.
+func BreakingSince(known, level int) string {
+	for i := max(known, 0); i < min(level, len(migrations)); i++ {
+		if migrations[i].Breaks != "" {
+			return migrations[i].Breaks
+		}
+	}
+	return ""
 }
 
 func Open(path string) (*sql.DB, error) {
@@ -320,7 +344,7 @@ func Open(path string) (*sql.DB, error) {
 	}
 	// Columns added after the first release; existing databases get them here.
 	for _, m := range migrations {
-		if _, err := d.Exec(m); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+		if _, err := d.Exec(m.SQL); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			d.Close()
 			return nil, fmt.Errorf("migrate: %w", err)
 		}

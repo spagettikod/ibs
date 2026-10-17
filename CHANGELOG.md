@@ -3,6 +3,13 @@
 Each release says what to update and which launcher and relay it works with: IBS,
 the launcher and the relay are released separately.
 
+## Unreleased
+
+- **Rolling back is possible more often:** only database changes that an older version
+  would misread block going back to it (so far: limited access keys, from 1.7.0).
+  Versions a site can never go back to are removed by themselves once the running
+  version has started fine; uploading one is refused, saying why.
+
 ## 1.7.1
 
 **What to update:** sites, under **Settings → Updates**; nodes follow.

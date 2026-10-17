@@ -139,10 +139,38 @@ func (s *Site) dbLevel() int {
 	return max(int(s.SettingInt("db_level")), db.Level)
 }
 
+// dbBlocker says why m can never run on this site's database again: a newer
+// version changed it in a way m doesn't know; "" when m can.
+func (s *Site) dbBlocker(m release.Manifest) string {
+	if why := db.BreakingSince(m.DBLevel, s.dbLevel()); why != "" {
+		return "a newer version changed this site's database for " + why
+	}
+	return ""
+}
+
+// removeUnrunnable removes held versions that can never run here again
+// (dbBlocker). Only once the running version passed its probation: until
+// then the launcher may still need to go back to the one before.
+func (s *Site) removeUnrunnable() {
+	st := s.store()
+	if !UnderLauncher() || st.Good() != version.Version {
+		return
+	}
+	for _, in := range st.List(st.Keys()) {
+		if in.Version == version.Version || release.Compare(in.Version, version.Version) > 0 {
+			continue
+		}
+		if why := s.dbBlocker(in.Manifest); why != "" && st.Remove(in.Version) == nil {
+			s.log.Info("removed a version this site can't go back to", "version", in.Version, "why", why)
+			s.notify(TopicPeers)
+		}
+	}
+}
+
 // compatBlocker explains why this site can't run m, or returns "".
 func (s *Site) compatBlocker(m release.Manifest) string {
-	if m.DBLevel < s.dbLevel() {
-		return "this site's database was changed by a newer version, which " + m.Version + " can't read"
+	if why := s.dbBlocker(m); why != "" {
+		return why
 	}
 	sites, _ := s.Network()
 	for _, n := range sites {
@@ -319,6 +347,12 @@ func (s *Site) UploadRelease(r io.Reader) (release.Installed, error) {
 		return release.Installed{}, err
 	}
 	in, err := s.store().Install(b, s.store().Keys())
+	if err == nil && in.Version != version.Version {
+		if why := s.dbBlocker(in.Manifest); why != "" {
+			s.store().Remove(in.Version)
+			return release.Installed{}, fmt.Errorf("IBS %s can't run on this site: %s", in.Version, why)
+		}
+	}
 	if err == nil {
 		s.log.Info("release uploaded", "version", in.Version, "key", in.KeyID)
 		s.notify(TopicPeers)
@@ -431,6 +465,7 @@ func (s *Site) newestHeld() string {
 func (s *Site) fetchReleases(ctx context.Context) {
 	s.updates.fetchRun.Lock()
 	defer s.updates.fetchRun.Unlock()
+	s.removeUnrunnable()
 	keys := s.store().Keys()
 	trusted := map[string]bool{}
 	for _, k := range keys {

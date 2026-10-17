@@ -128,6 +128,12 @@ A release records the oldest version it can work alongside (`MinCompatible` in
 `MinCompatible` when a release changes what sites or nodes exchange in a way older
 versions can't handle; sites then refuse to roll back past it.
 
+Database changes (`migrations` in `internal/db`) say in `Breaks` why older versions
+must not run after them, or nothing when they just won't notice (a column they ignore).
+Only a breaking change stops a site going back to versions from before it, and those
+versions are then removed from the site. Mark a change breaking when an older version
+would misread the data or weaken what it means, like ignoring access key limits.
+
 1. Add the version's notes to `CHANGELOG.md` (`## <version>`) and commit. IBS, the
    launcher and the relay are released separately, so the notes start with two lines
    that `release.sh` checks for: **What to update** (sites, nodes, relays, and how) and
