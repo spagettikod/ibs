@@ -28,6 +28,7 @@ seconds. Versions and deduplication are your backup tool's job.
 - [More setup](#more-setup)
 - [Configuration](#configuration)
 - [How your data is protected](#how-your-data-is-protected)
+- [Disk space](#disk-space)
 - [When something goes wrong](#when-something-goes-wrong)
 - [S3 compatibility](#s3-compatibility)
 - [FAQ](#faq)
@@ -367,14 +368,8 @@ Environment variables. All are optional.
   shows it, and you can start one by hand). A damaged or missing block is replaced from
   another copy. If no intact copy is left, the Scrub page names the affected
   files and reading them fails, instead of returning damaged data.
-- **When storage runs out.** Other sites' copies may use any free space on your site,
-  but your own files come first: when an upload needs room, your site pushes other
-  sites' copies away. Their owners place them on another site, or, if no site has room,
-  keep each file at two copies (the original and one elsewhere) until there's room
-  again. Their dashboard then says the IBS is running out of space. Copies of an offline
-  site are never pushed away. If nothing can make room, the upload fails with "storage
-  is full". So when the IBS fills up, files lose their third copy before anyone's
-  upload fails: add storage or a site in time.
+- **When storage runs out,** files lose their third copy before anyone's upload fails.
+  See [Disk space](#disk-space).
 - **The site's index is backed up too.** The manager's database knows which files
   exist, which blocks they consist of, and where those blocks are. An encrypted copy of
   it goes to every storage node and every connected site, within about 15 seconds of
@@ -388,6 +383,34 @@ Environment variables. All are optional.
   other out; a site can only leave by itself. An invite code works once and for a day;
   a wrong guess makes it stop working, and the relay that passes it on can't read or
   use it.
+
+## Disk space
+
+Your site's storage is what its nodes' limits allow (**Nodes → Change**, or
+`IBS_STORAGE_LIMIT`). It holds your own files and the copies your site keeps for other
+sites. Your own files come first:
+
+- **Other sites' copies use free space, not your space.** They may fill any free space
+  except a small margin (5% of your storage, at most 1 GB), so your uploads always have
+  room to start.
+- **Your uploads push other sites' copies away when they need room.** Your site asks the
+  owners to take copies back. An owner first places each copy on another site with
+  room; if there is none, it gives the copy up as long as the file keeps two copies
+  (its original and one elsewhere). Copies of a site that's offline are never pushed
+  away. For an hour after that (`IBS_ROOM_COOLDOWN`) your site takes no new copies, so
+  they don't flow straight back.
+- **The copies come back when there's room.** Until then the owner's dashboard says
+  the IBS is running out of space and how many blocks lack a copy.
+- **Only when nothing can be pushed away** does an upload fail with "storage is full".
+
+So when the IBS as a whole fills up, files lose their third copy before anyone's upload
+fails. Add storage or a site when the dashboard warns.
+
+**Where to look:** the dashboard's **Storage** tile shows how much is used and how much
+of it is other sites' copies. The dashboard warns when your own files are running out of
+room; other sites' copies count as room. **Nodes** shows each node's blocks and the
+copies it keeps for other sites, and **The Known Universe** what each site shares and
+holds.
 
 ## When something goes wrong
 
@@ -668,13 +691,8 @@ automatically. See [Updates](#updates).
 
 **How much space do I share with the IBS?**
 
-What your nodes' limits allow (**Nodes → Change**, or `IBS_STORAGE_LIMIT`). Other
-sites' copies may use any free space, but your own files come first: when they need
-room, your site pushes other sites' copies away. Their owners place them on another
-site first; if the IBS is full, a file may drop to two copies (the original and one
-elsewhere) until there is room again. Copies of a site that is offline are never pushed
-away. **The Known Universe** shows what each site shares, and the dashboard warns when
-the IBS is running out of space.
+All free space, but your own files always come first: other sites' copies make way when
+you need the room. See [Disk space](#disk-space).
 
 ## Limitations
 
