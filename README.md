@@ -56,7 +56,7 @@ IBS runs in Docker. Choose your case; the ports each machine needs are under
      -p 9000:9000 \
      -p 7443:7443/tcp \
      -p 7443:7443/udp \
-     ghcr.io/spagettikod/ibs/launcher:1.0.0
+     ghcr.io/spagettikod/ibs/launcher:1.1.0
    ```
 
    Or with Docker Compose:
@@ -64,7 +64,7 @@ IBS runs in Docker. Choose your case; the ports each machine needs are under
    ```yaml
    services:
      ibs:
-       image: ghcr.io/spagettikod/ibs/launcher:1.0.0
+       image: ghcr.io/spagettikod/ibs/launcher:1.1.0
        container_name: ibs
        restart: unless-stopped
        ports:
@@ -136,7 +136,7 @@ IBS runs in Docker. Choose your case; the ports each machine needs are under
      -p 9000:9000 \
      -p 7443:7443/tcp \
      -p 7443:7443/udp \
-     ghcr.io/spagettikod/ibs/launcher:1.0.0
+     ghcr.io/spagettikod/ibs/launcher:1.1.0
    ```
 
    Or with Docker Compose:
@@ -144,7 +144,7 @@ IBS runs in Docker. Choose your case; the ports each machine needs are under
    ```yaml
    services:
      ibs:
-       image: ghcr.io/spagettikod/ibs/launcher:1.0.0
+       image: ghcr.io/spagettikod/ibs/launcher:1.1.0
        container_name: ibs
        restart: unless-stopped
        ports:
@@ -219,7 +219,7 @@ docker run -d \
   -v /srv/ibs-node:/data \
   -p 7480:7480 \
   -e IBS_MANAGER=<manager-host>:7443 \
-  ghcr.io/spagettikod/ibs/launcher:1.0.0 \
+  ghcr.io/spagettikod/ibs/launcher:1.1.0 \
   node <token>
 ```
 
@@ -228,7 +228,7 @@ Or with Docker Compose:
 ```yaml
 services:
   ibs-node:
-    image: ghcr.io/spagettikod/ibs/launcher:1.0.0
+    image: ghcr.io/spagettikod/ibs/launcher:1.1.0
     container_name: ibs-node
     command: ["node"]
     restart: unless-stopped

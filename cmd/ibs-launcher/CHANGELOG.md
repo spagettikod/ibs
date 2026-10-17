@@ -3,10 +3,16 @@
 The launcher (`ghcr.io/spagettikod/ibs/launcher`) is versioned separately from IBS. Each
 release says which IBS versions it works with.
 
-## Unreleased
+## 1.1.0
+
+**What to update:** pull `ghcr.io/spagettikod/ibs/launcher:1.1.0` for new sites and
+nodes; running ones work with 1.0.0 too.
+
+**Works with:** IBS 1.3.0 or newer.
 
 - The first download of IBS, from GitHub or a node's manager, has no total time limit:
   it goes on while data arrives and fails after 30 seconds without any.
+- Node join tokens are only accepted in the current form (`ibsn2.`).
 
 ## 1.0.0
 

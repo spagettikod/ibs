@@ -3,34 +3,27 @@
 Each release says what to update and which launcher and relay it works with: IBS,
 the launcher and the relay are released separately.
 
-## Unreleased
+## 1.6.0
 
-- **Fix: uploads that took longer than 10 minutes could lose their first blocks.** The
-  upload reported success, but reading the file failed later. Blocks of an upload now
-  belong to it until it finishes, however long it takes, and an upload fails instead of
-  succeeding if a block is missing. A scrub shows whether older files were affected.
-- **IBS no longer deduplicates.** Every file has its own blocks (encrypted with a
-  random nonce), copies included: your backup tool deduplicates already. Deleted or
-  overwritten data is removed here and on the other sites within seconds instead of
-  after 10 minutes. Unfinished multipart uploads are removed when nothing has arrived
-  for them for 10 minutes.
-- **A site offline for 2 minutes (was 30) gets its copies re-created elsewhere**, at
-  most 20 MB/s (`IBS_REBUILD_RATE`), like a RAID rebuild. Storage nodes keep 30 minutes,
-  now set with `IBS_NODE_GRACE`.
-- Code for older versions is gone: old node join tokens (`ibsn1.`), sites' own reports
-  on copies they keep for others, and storage nodes that can't check blocks themselves.
-- **A scrub checks your copies on other sites too.** Each batch of your blocks is
-  checked here and, at the same time, on the sites holding copies. They must answer a
-  fresh challenge that only the exact same bytes answer, so your site compares the
-  copies itself. Missing, damaged or different copies are copied again. Sites check
-  copies they keep for others only when the owner hasn't for 60 days. Sites on older
-  versions still check copies themselves.
-- The scrub history shows how much data each scrub read, besides the blocks.
-- **Limits by progress, not by time:** transfers between sites and storage nodes, in
-  either direction, have no total time limit. They go on as long as data moves, and
-  fail after 30 seconds without any progress, including waiting for an answer. Work
-  behind a single request is kept to seconds, so that limit only catches real failures.
-  Connecting gives up after 5 seconds. Storage nodes now update over slow networks too.
+**What to update:** sites, under **Settings → Updates**; nodes follow. Update every
+site: a scrub only checks the copies on sites running 1.6.0. New sites and nodes can use
+launcher 1.1.0.
+
+**Works with:** launcher 1.0.0 or newer (1.1.0 recommended), relay 1.2.0 or newer (1.4.0
+for short invite codes).
+
+- **Fix: uploads taking over 10 minutes could lose their first blocks** while reporting
+  success. An upload now owns its blocks until it finishes, and fails if one is missing.
+- **No deduplication:** every file has its own blocks. Deleted and overwritten data is
+  removed here and on other sites within seconds. Abandoned multipart uploads go after
+  10 minutes.
+- **Scrubs check your copies on other sites,** by a challenge only the exact bytes
+  answer, and copy missing or damaged ones again. The history shows the data read.
+- **A site offline for 2 minutes** (was 30) gets its copies re-created elsewhere, at most
+  20 MB/s (`IBS_REBUILD_RATE`). Storage nodes: 30 minutes (`IBS_NODE_GRACE`).
+- **Limits by progress, not time:** transfers fail after 30 seconds without progress,
+  never while data moves. Storage nodes now update over slow networks too.
+- Code for older versions removed, including `ibsn1.` node join tokens.
 
 ## 1.5.4
 

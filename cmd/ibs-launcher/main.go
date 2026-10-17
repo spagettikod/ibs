@@ -43,7 +43,7 @@ import (
 )
 
 // Version is the launcher's own version; see CHANGELOG.md next to this file.
-var Version = "1.0.0"
+var Version = "1.1.0"
 
 // RestartCode is the exit code IBS uses to ask for the current version to be
 // started (after it installed an update or a rollback).
