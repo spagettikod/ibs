@@ -547,6 +547,7 @@ type PeerInfo struct {
 	LastError   string   `json:"last_error"`
 	Reconciled  int64    `json:"reconciled"`
 	ReplicasOut int64    `json:"replicas_out"` // our blocks stored there
+	Removing    int64    `json:"removing"`     // our deleted blocks it hasn't removed yet
 	BytesOut    int64    `json:"bytes_out"`
 	HeldBlocks  int64    `json:"held_blocks"` // their blocks stored here
 	HeldBytes   int64    `json:"held_bytes"`
@@ -563,6 +564,7 @@ func (s *Site) Peers() ([]PeerInfo, error) {
 			p.capacity, p.free, p.last_error, p.reconciled,
 			(SELECT COUNT(*) FROM replicas r WHERE r.site_id = p.site_id AND r.state = 'ok'),
 			(SELECT COALESCE(SUM(b.size), 0) FROM replicas r JOIN blocks b ON b.id = r.block_id WHERE r.site_id = p.site_id AND r.state = 'ok'),
+			(SELECT COUNT(*) FROM replicas r WHERE r.site_id = p.site_id AND r.state = 'delete'),
 			(SELECT COUNT(*) FROM held_blocks h WHERE h.owner = p.site_id),
 			(SELECT COALESCE(SUM(size), 0) FROM held_blocks h WHERE h.owner = p.site_id),
 			p.routes, p.version
@@ -576,7 +578,7 @@ func (s *Site) Peers() ([]PeerInfo, error) {
 		var p PeerInfo
 		var routesJSON string
 		if err := rows.Scan(&p.SiteID, &p.Name, &p.Address, &p.Added, &p.Online, &p.LastSeen, &p.UpSince,
-			&p.Capacity, &p.Free, &p.LastError, &p.Reconciled, &p.ReplicasOut, &p.BytesOut, &p.HeldBlocks, &p.HeldBytes, &routesJSON, &p.Version); err != nil {
+			&p.Capacity, &p.Free, &p.LastError, &p.Reconciled, &p.ReplicasOut, &p.BytesOut, &p.Removing, &p.HeldBlocks, &p.HeldBytes, &routesJSON, &p.Version); err != nil {
 			return nil, err
 		}
 		p.Path = s.pathInfo(p.SiteID)

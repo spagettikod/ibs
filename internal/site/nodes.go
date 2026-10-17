@@ -43,7 +43,8 @@ type NodeInfo struct {
 	Lost         bool   `json:"lost"`                // offline beyond the grace period: blocks are being restored elsewhere
 	Stranded     int64  `json:"stranded"`            // blocks on this node with no replica on another site
 	MetadataGen  int64  `json:"metadata_generation"` // metadata snapshot pushed to it (-1 none; manager: current)
-	Blocks       int64  `json:"blocks"`
+	Blocks       int64  `json:"blocks"`              // this site's blocks on it
+	HeldBlocks   int64  `json:"held_blocks"`         // copies it keeps for other sites
 	Used         int64  `json:"used"`
 }
 
@@ -250,7 +251,7 @@ func (s *Site) SetNodeLimit(id string, limit int64) error {
 
 func (s *Site) Nodes() ([]NodeInfo, error) {
 	rows, err := s.DB.Query(`SELECT n.id, n.name, n.address, n.quota, n.env_limit != 0, n.version, n.disk_capacity, n.disk_free, n.capacity, n.free, n.last_seen, n.is_local,
-			(SELECT COUNT(*) FROM blocks b WHERE b.node_id = n.id) + (SELECT COUNT(*) FROM held_blocks h WHERE h.node_id = n.id),
+			(SELECT COUNT(*) FROM blocks b WHERE b.node_id = n.id AND b.refs > 0), (SELECT COUNT(*) FROM held_blocks h WHERE h.node_id = n.id),
 			(SELECT COALESCE(SUM(size), 0) FROM blocks b WHERE b.node_id = n.id) + (SELECT COALESCE(SUM(size), 0) FROM held_blocks h WHERE h.node_id = n.id),
 			(SELECT COUNT(*) FROM blocks b WHERE b.node_id = n.id AND b.refs > 0 AND NOT EXISTS
 				(SELECT 1 FROM replicas r WHERE r.block_id = b.id AND r.state = 'ok'))
@@ -264,7 +265,7 @@ func (s *Site) Nodes() ([]NodeInfo, error) {
 	var out []NodeInfo
 	for rows.Next() {
 		var n NodeInfo
-		if err := rows.Scan(&n.ID, &n.Name, &n.Address, &n.Quota, &n.LimitFromEnv, &n.Version, &n.DiskCapacity, &n.DiskFree, &n.Capacity, &n.Free, &n.LastSeen, &n.Local, &n.Blocks, &n.Used, &n.Stranded); err != nil {
+		if err := rows.Scan(&n.ID, &n.Name, &n.Address, &n.Quota, &n.LimitFromEnv, &n.Version, &n.DiskCapacity, &n.DiskFree, &n.Capacity, &n.Free, &n.LastSeen, &n.Local, &n.Blocks, &n.HeldBlocks, &n.Used, &n.Stranded); err != nil {
 			return nil, err
 		}
 		n.Online = n.LastSeen >= cutoff

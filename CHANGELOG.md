@@ -3,6 +3,14 @@
 Each release says what to update and which launcher and relay it works with: IBS,
 the launcher and the relay are released separately.
 
+## Unreleased
+
+- **Nodes** shows a site's own blocks, and copies kept for other sites on a line of
+  their own. **The Known Universe** says when deleted copies are still being removed
+  on another site. **Your files** on the dashboard shows the number of blocks.
+- **The network diagram** draws a site-to-relay line only when the site doesn't connect
+  through that relay already.
+
 ## 1.6.0
 
 **What to update:** sites, under **Settings → Updates**; nodes follow. Update every

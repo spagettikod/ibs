@@ -158,6 +158,9 @@ export default function NetworkGraph({ selfId, selfName, selfUpSince, sites, lin
   }, [selfId, selfName, selfUpSince, sites, links, relays, cx, cy])
 
   const node = (id: string) => nodes.find((n) => n.id === id)
+  // Sites with a connection through a relay, as "site|relay".
+  const throughRelay = new Set(edges.filter((e) => e.link.online && e.link.kind === 'relay' && e.link.relay)
+    .flatMap((e) => [`${e.a}|${e.link.relay}`, `${e.b}|${e.link.relay}`]))
   const relayOf = (id?: string) => relayPos.find((r) => r.id === id)
 
   // Geometry of an edge: straight for direct, a curve through the relay otherwise.
@@ -195,7 +198,8 @@ export default function NetworkGraph({ selfId, selfName, selfUpSince, sites, lin
         {uplinks.map((u) => {
           const a = node(u.from)
           const r = relayOf(u.relay)
-          if (!a || !r) return null
+          // A connection through the relay already runs through it.
+          if (!a || !r || throughRelay.has(`${u.from}|${u.relay}`)) return null
           return <line key={u.from + u.to} x1={a.x} y1={a.y} x2={r.x} y2={r.y} className={`uplink ${u.online ? '' : 'offline'}`} />
         })}
         {edges.map((e) => {

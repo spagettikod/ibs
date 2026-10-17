@@ -108,6 +108,7 @@ export default function NetworkPage() {
                   <td className="num">{p.online ? fmtSpeed(p.path.bps) : '—'}</td>
                   <Shared capacity={p.capacity} free={p.free} />
                   <td>{fmtBytes(p.bytes_out)}<div className="muted small">{p.replicas_out.toLocaleString()} blocks</div>
+                    {p.removing > 0 && <div className="muted small">{p.removing.toLocaleString()} deleted, being removed there</div>}
                     {p.out_bps > 0 && <div className="small accent-text">+ {fmtSpeed(p.out_bps)} now</div>}</td>
                   <td>{fmtBytes(p.held_bytes)}<div className="muted small">{p.held_blocks.toLocaleString()} blocks</div>
                     {p.in_bps > 0 && <div className="small accent-text">+ {fmtSpeed(p.in_bps)} now</div>}</td>

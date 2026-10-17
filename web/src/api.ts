@@ -34,7 +34,7 @@ export type State = { setup: boolean; authenticated: boolean; site_name?: string
 export type NodeInfo = {
   id: string; name: string; address: string; quota: number; limit_from_env: boolean; disk_capacity: number; disk_free: number
   capacity: number; free: number
-  last_seen: number; local: boolean; online: boolean; lost: boolean; stranded: number; blocks: number; used: number
+  last_seen: number; local: boolean; online: boolean; lost: boolean; stranded: number; blocks: number; held_blocks: number; used: number
   metadata_generation: number; version: string
 }
 
@@ -46,7 +46,7 @@ export type PathInfo = {
 export type PeerInfo = {
   site_id: string; name: string; address: string; added: number; online: boolean
   last_seen: number; up_since: number; capacity: number; free: number; last_error: string
-  reconciled: number; replicas_out: number; bytes_out: number; held_blocks: number; held_bytes: number
+  reconciled: number; replicas_out: number; removing: number; bytes_out: number; held_blocks: number; held_bytes: number
   path: PathInfo; relays: number; version: string; out_bps: number; in_bps: number
 }
 

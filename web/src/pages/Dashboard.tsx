@@ -165,7 +165,7 @@ export default function DashboardPage() {
 
       <div className="tiles">
         <Stat label="Your files" value={fmtBytes(site.object_bytes)}
-          sub={`${site.objects} ${site.objects === 1 ? 'object' : 'objects'} in ${site.buckets} ${site.buckets === 1 ? 'bucket' : 'buckets'}`} />
+          sub={`${site.objects.toLocaleString()} ${site.objects === 1 ? 'object' : 'objects'} in ${site.buckets} ${site.buckets === 1 ? 'bucket' : 'buckets'}, ${r.blocks.toLocaleString()} ${r.blocks === 1 ? 'block' : 'blocks'}`} />
         <Stat label="Copies on other sites" value={r.copying > 0 ? `${copied}%` : `${have} of ${want}`}
           tone={r.under_replicated === 0 ? 'ok' : 'warn'}
           sub={r.copying > 0 ? `copying, ${r.copying.toLocaleString()} blocks left`

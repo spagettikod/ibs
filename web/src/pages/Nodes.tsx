@@ -102,8 +102,8 @@ export default function NodesPage() {
                   <Status online={n.online} label={n.lost ? 'lost' : undefined} />
                   {!n.online && <div className="muted small">seen {ago(n.last_seen)}</div>}
                   {n.lost && <div className="small warn-text">Restoring its blocks on other nodes from the IBS</div>}
-                  {n.quota < 0 && n.blocks > 0 && n.online && (
-                    <div className="small warn-text">Shares nothing: moving its {n.blocks} blocks to other nodes</div>
+                  {n.quota < 0 && n.blocks + n.held_blocks > 0 && n.online && (
+                    <div className="small warn-text">Shares nothing: moving its {(n.blocks + n.held_blocks).toLocaleString()} blocks to other nodes</div>
                   )}
                   {n.stranded > 0 && (
                     <div className="small warn-text" title="These blocks are not copied to other sites yet.">
@@ -113,7 +113,8 @@ export default function NodesPage() {
                 </td>
                 <Version v={n.version} />
                 <td className="mono small">{n.address || '—'}</td>
-                <td>{n.blocks}</td>
+                <td>{n.blocks.toLocaleString()}
+                  {n.held_blocks > 0 && <div className="muted small">+ {n.held_blocks.toLocaleString()} copies kept for other sites</div>}</td>
                 <td className="meter-cell">
                   <Meter used={n.used} total={n.used + n.free} />
                   <span className="muted small">{fmtBytes(n.used)} used · {fmtBytes(n.free)} free</span>
