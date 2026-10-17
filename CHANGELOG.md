@@ -3,7 +3,12 @@
 Each release says what to update and which launcher and relay it works with: IBS,
 the launcher and the relay are released separately.
 
-## Unreleased
+## 1.7.2
+
+**What to update:** sites, under **Settings → Updates**; nodes follow.
+
+**Works with:** launcher 1.0.0 or newer (1.1.0 recommended), relay 1.2.0 or newer (1.4.0
+for short invite codes).
 
 - **Rolling back is possible more often:** only database changes that an older version
   would misread block going back to it (so far: limited access keys, from 1.7.0).
