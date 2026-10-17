@@ -54,6 +54,21 @@ func (h *hub) notify(topics ...string) {
 	}
 }
 
+// notifyNow sends topics within coalesceDelay, also during a stream of
+// changes: for what the user should see at once, like activity starting and
+// stopping.
+func (h *hub) notifyNow(topics ...string) {
+	h.mu.Lock()
+	for _, t := range topics {
+		h.pending[t] = true
+	}
+	if h.timer != nil {
+		h.timer.Stop()
+	}
+	h.timer = time.AfterFunc(coalesceDelay, h.flush)
+	h.mu.Unlock()
+}
+
 func (h *hub) flush() {
 	h.mu.Lock()
 	defer h.mu.Unlock()

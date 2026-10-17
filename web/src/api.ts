@@ -81,6 +81,7 @@ export type Dashboard = {
   }
   ibs_capacity: IBSCapacity
   counted: boolean // the figures above are in; false right after a start
+  activity: { writing: boolean; deleting: boolean; buckets: Record<string, 'writing' | 'deleting'> }
   nodes: NodeInfo[]
   peers: PeerInfo[]
   network: NetSite[]
@@ -99,7 +100,7 @@ export type StorableCapacity = {
   limited_by: 'site' | 'ibs' | 'sites'
 }
 
-export type Bucket = { name: string; created: string; replication: number; counted: boolean; objects: number; size: number; pending: number }
+export type Bucket = { name: string; created: string; replication: number; counted: boolean; activity?: 'writing' | 'deleting'; objects: number; size: number; pending: number }
 
 export type ObjectInfo = { bucket: string; key: string; size: number; etag: string; content_type: string; modified: string }
 

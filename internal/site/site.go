@@ -80,6 +80,7 @@ type Site struct {
 	links   map[string]Link // learned from other sites
 	updates updateState
 	scrub   scrubState
+	act     activity // files arriving and being deleted (activity.go)
 	// scrubLimit keeps scrub reads to IBS_SCRUB_RATE: this site's scrubs and
 	// the checks other sites' scrubs ask for.
 	scrubLimit byteLimiter
@@ -316,6 +317,7 @@ func (s *Site) Run(ctx context.Context) {
 		}
 	}()
 	every(2*time.Second, "transfer-events", s.transferEvents)
+	every(500*time.Millisecond, "activity-events", func(context.Context) { s.activityEvents() })
 	go s.statsLoop(ctx)
 	// Trimming surplus copies scans every block: only after changes (the
 	// replication loop clears replDirty; trimming catches up on its next

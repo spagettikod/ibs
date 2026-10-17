@@ -159,6 +159,10 @@ export default function DashboardPage() {
   // Of the copies the other sites can take now: with fewer sites than copies,
   // the rest wait for another site (the health list says so).
   const copied = r.copies_possible === 0 ? 100 : Math.floor((100 * r.copies_made) / r.copies_possible)
+  // Files arriving or being deleted right now; the figures catch up within seconds.
+  const act = data.activity
+  const busy = act?.writing && act?.deleting ? 'Files arriving and being deleted…'
+    : act?.writing ? 'Files arriving…' : act?.deleting ? 'Files being deleted…' : ''
   // Copies per file on other sites: wanted, and what the online sites allow.
   const want = data.ibs_capacity.copies
   const have = Math.min(data.ibs_capacity.sites, want)
@@ -185,15 +189,16 @@ export default function DashboardPage() {
           </>
         ) : (
           <>
-            <Stat label="Your files" value={fmtBytes(site.object_bytes)}
-              sub={`${site.objects.toLocaleString()} ${site.objects === 1 ? 'object' : 'objects'} in ${site.buckets} ${site.buckets === 1 ? 'bucket' : 'buckets'}, ${r.blocks.toLocaleString()} ${r.blocks === 1 ? 'block' : 'blocks'}`} />
+            <Stat label="Your files" value={<>{fmtBytes(site.object_bytes)}{busy && <> <Spinner title={busy} /></>}</>}
+              sub={<>{busy && <div className="accent-text">{busy}</div>}
+                {`${site.objects.toLocaleString()} ${site.objects === 1 ? 'object' : 'objects'} in ${site.buckets} ${site.buckets === 1 ? 'bucket' : 'buckets'}, ${r.blocks.toLocaleString()} ${r.blocks === 1 ? 'block' : 'blocks'}`}</>} />
             <Stat label="Copies on other sites" value={r.copying > 0 ? `${copied}%` : `${have} of ${want}`}
               tone={r.under_replicated === 0 ? 'ok' : 'warn'}
               sub={r.copying > 0 ? `copying, ${r.copying.toLocaleString()} blocks left`
                 : r.under_replicated > 0 && have < want ? `per file; the next needs ${want - have === 1 ? 'another site' : 'more sites'}`
                 : r.under_replicated > 0 ? `per file; ${r.under_replicated.toLocaleString()} blocks wait for room`
                 : 'per file, all in place'} />
-            <Stat label="Room for your files" value={fmtBytes(roomForMine)}
+            <Stat label="Room for your files" value={<>{fmtBytes(roomForMine)}{busy && <> <Spinner title={busy} /></>}</>}
               sub={<><Meter used={mine} total={site.capacity} />
                 {site.held_bytes > 0
                   ? <>{fmtBytes(site.free)} empty, {fmtBytes(giving)} other sites' copies that make way for yours

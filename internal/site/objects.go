@@ -56,7 +56,8 @@ type BucketInfo struct {
 	Name        string    `json:"name"`
 	Created     time.Time `json:"created"`
 	Replication int       `json:"replication"`
-	Counted     bool      `json:"counted"` // the counts below are in (stats.go)
+	Counted     bool      `json:"counted"`            // the counts below are in (stats.go)
+	Activity    string    `json:"activity,omitempty"` // "writing" or "deleting" files now
 	Objects     int64     `json:"objects"`
 	Size        int64     `json:"size"`
 	Pending     int64     `json:"pending"` // blocks still missing replicas
@@ -150,6 +151,7 @@ func (s *Site) ListBuckets() ([]BucketInfo, error) {
 	}
 	defer rows.Close()
 	st := s.stats() // the counts, from the cache
+	act := s.Activity()
 	var out []BucketInfo
 	for rows.Next() {
 		var b BucketInfo
@@ -162,6 +164,7 @@ func (s *Site) ListBuckets() ([]BucketInfo, error) {
 			c := st.Buckets[b.Name]
 			b.Counted, b.Objects, b.Size, b.Pending = true, c.Objects, c.Size, c.Pending
 		}
+		b.Activity = act.Buckets[b.Name]
 		out = append(out, b)
 	}
 	return out, rows.Err()
@@ -230,6 +233,7 @@ func (s *Site) writeBlocks(ctx context.Context, bucket string, r io.Reader) (res
 			if err := s.storeBlock(ctx, bucket, res.upload, id, ct); err != nil {
 				return nil, fmt.Errorf("store block: %w", err)
 			}
+			s.noteWrite(bucket) // a file is arriving, also while it's large
 			res.blocks = append(res.blocks, BlockRef{ID: id, Size: int64(n)})
 			res.size += int64(n)
 		}
@@ -352,6 +356,7 @@ func (s *Site) PutObject(ctx context.Context, bucket, key string, r io.Reader, c
 		s.releaseUpload(wr.upload)
 		return nil, err
 	}
+	s.noteWrite(bucket)
 	return o, nil
 }
 
@@ -371,6 +376,7 @@ func (s *Site) DeleteObject(bucket, key string) error {
 		if _, err := tx.Exec(`DELETE FROM objects WHERE bucket = ? AND key = ?`, bucket, key); err != nil {
 			return err
 		}
+		s.noteDelete(bucket)
 		return adjustRefs(tx, decodeBlocks(blocks), -1)
 	})
 }
@@ -786,6 +792,9 @@ func (s *Site) CompleteUpload(bucket, key, uploadID string, parts []CompletePart
 		_, err = tx.Exec(`DELETE FROM uploads WHERE id = ?`, uploadID)
 		return err
 	})
+	if err == nil {
+		s.noteWrite(bucket)
+	}
 	return o, err
 }
 

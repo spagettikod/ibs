@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useRef, useState } from 'react'
 import { api, Bucket, ObjectInfo, StorableCapacity } from '../api'
-import { Card, Counted, Empty, ErrorBox, fmtBytes, fmtDate, useLoader } from '../ui'
+import { Card, Counted, Empty, ErrorBox, fmtBytes, fmtDate, Spinner, useLoader } from '../ui'
 
 function route(): { bucket?: string; prefix: string } {
   const parts = window.location.hash.replace(/^#\/?/, '').split('/')
@@ -76,7 +76,8 @@ function BucketList() {
               {data?.map((b) => (
                 <tr key={b.name}>
                   <td><a href="#" onClick={(e) => { e.preventDefault(); go(b.name) }}>{b.name}</a></td>
-                  <td><Counted ok={b.counted}>{b.objects.toLocaleString()}</Counted></td>
+                  <td><Counted ok={b.counted}>{b.objects.toLocaleString()}</Counted>
+                    {b.activity && <> <Spinner title={b.activity === 'writing' ? 'Files arriving…' : 'Files being deleted…'} /></>}</td>
                   <td><Counted ok={b.counted}>{fmtBytes(b.size)}</Counted></td>
                   <td><Counted ok={b.counted}><ReplicationStatus b={b} sites={sites} /></Counted></td>
                   <td>{fmtDate(b.created)}</td>

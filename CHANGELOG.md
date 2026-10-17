@@ -3,6 +3,12 @@
 Each release says what to update and which launcher and relay it works with: IBS,
 the launcher and the relay are released separately.
 
+## Unreleased
+
+- **A spinner shows when files are arriving or being deleted,** on the dashboard's Your
+  files and Room for your files and next to the busy bucket, while the figures catch
+  up. It goes within a second after the last change.
+
 ## 1.7.3
 
 **What to update:** sites, under **Settings → Updates**; nodes follow.

@@ -290,6 +290,7 @@ type Dashboard struct {
 	// Counted: the figures from the cache are in; false right after a start,
 	// before the first calculation.
 	Counted     bool              `json:"counted"`
+	Activity    Activity          `json:"activity"` // files arriving or being deleted now
 	Replication ReplicationHealth `json:"replication"`
 	Capacity    IBSCapacity       `json:"ibs_capacity"`
 	Nodes       []NodeInfo        `json:"nodes"`
@@ -313,6 +314,7 @@ func (s *Site) Dashboard() (*Dashboard, error) {
 	d.Site.Restored = s.SettingInt("restored")
 	d.Site.Location = s.Location()
 	s.DB.QueryRow(`SELECT COUNT(*) FROM buckets`).Scan(&d.Site.Buckets)
+	d.Activity = s.Activity()
 	// The expensive figures come from the cache (stats.go).
 	if st := s.stats(); st != nil {
 		d.Counted = true
