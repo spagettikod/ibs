@@ -36,8 +36,9 @@ function attention(d: Dashboard, tls?: TLSStatus, updates?: UpdatesInfo, scrub?:
   if (r.missing_locally > 0) {
     out.push({ level: 'warn', text: `${r.missing_locally.toLocaleString()} blocks are read from other sites for now: they're missing here and being restored`, href: '#/nodes', link: 'Nodes' })
   }
-  // Other sites' copies make way for this site's own files, so they count as room.
-  const room = d.site.free + d.site.held_bytes
+  // Other sites' copies make way for this site's own files, so they count as
+  // room; those of offline sites don't, they can't be pushed away.
+  const room = d.site.free + d.site.held_bytes - d.site.held_offline
   if (d.site.capacity > 0 && room < d.site.capacity * 0.05) {
     out.push({ level: 'bad', text: `Uploads will soon fail: only ${fmtBytes(room)} is left for this site's files`, href: '#/nodes', link: 'Nodes' })
   }
@@ -144,7 +145,11 @@ export default function DashboardPage() {
   const { site, replication: r } = data
   const nodes = data.nodes ?? []
   const network = data.network ?? []
-  const used = site.capacity - site.free
+  // Room for this site's files: free space, and other sites' copies that make
+  // way for them (not those of offline sites, which can't be pushed away).
+  const giving = site.held_bytes - site.held_offline
+  const roomForMine = site.free + giving
+  const mine = Math.max(site.capacity - site.free - site.held_bytes, 0)
   const online = network.filter((n) => n.online).length + 1
   // Of the copies the other sites can take now: with fewer sites than copies,
   // the rest wait for another site (the health list says so).
@@ -175,9 +180,12 @@ export default function DashboardPage() {
             : r.under_replicated > 0 && have < want ? `per file; the next needs ${want - have === 1 ? 'another site' : 'more sites'}`
             : r.under_replicated > 0 ? `per file; ${r.under_replicated.toLocaleString()} blocks wait for room`
             : 'per file, all in place'} />
-        <Stat label="Storage" value={`${fmtBytes(site.free)} free`}
-          sub={<><Meter used={used} total={site.capacity} />{fmtBytes(used)} of {fmtBytes(site.capacity)} used
-            {site.held_bytes > 0 ? `, ${fmtBytes(site.held_bytes)} of it other sites' copies` : ''}</>} />
+        <Stat label="Room for your files" value={fmtBytes(roomForMine)}
+          sub={<><Meter used={mine} total={site.capacity} />
+            {site.held_bytes > 0
+              ? <>{fmtBytes(site.free)} empty, {fmtBytes(giving)} other sites' copies that make way for yours
+                {site.held_offline > 0 && `; ${fmtBytes(site.held_offline)} held for offline sites`}</>
+              : <>{fmtBytes(mine)} of {fmtBytes(site.capacity)} used by your files</>}</>} />
         <a className="tile-link" href="#/network"><Stat label="The IBS" value={`${online} of ${network.length + 1}`} sub="sites online" /></a>
         <ScrubTile info={scrub.data} />
       </div>

@@ -406,9 +406,9 @@ sites. Your own files come first:
 So when the IBS as a whole fills up, files lose their third copy before anyone's upload
 fails. Add storage or a site when the dashboard warns.
 
-**Where to look:** the dashboard's **Storage** tile shows how much is used and how much
-of it is other sites' copies. The dashboard warns when your own files are running out of
-room; other sites' copies count as room. **Nodes** shows each node's blocks and the
+**Where to look:** the dashboard's **Room for your files** tile shows how much more you
+can store: the empty space plus other sites' copies that make way for yours (not those of
+offline sites). The dashboard warns when that runs low. **Nodes** shows each node's blocks and the
 copies it keeps for other sites, and **The Known Universe** what each site shares and
 holds.
 

@@ -73,7 +73,7 @@ export type Dashboard = {
   site: {
     site_id: string; name: string; up_since: number; capacity: number; free: number; offered: number
     generation: number; peer_advertise: string; web_host?: string; buckets: number; objects: number; object_bytes: number
-    held_blocks: number; held_bytes: number; restored: number; location?: Location
+    held_blocks: number; held_bytes: number; held_offline: number; restored: number; location?: Location
   }
   replication: {
     blocks: number; bytes: number; under_replicated: number; over_replicated: number

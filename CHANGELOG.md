@@ -3,6 +3,17 @@
 Each release says what to update and which launcher and relay it works with: IBS,
 the launcher and the relay are released separately.
 
+## 1.7.1
+
+**What to update:** sites, under **Settings → Updates**; nodes follow.
+
+**Works with:** launcher 1.0.0 or newer (1.1.0 recommended), relay 1.2.0 or newer (1.4.0
+for short invite codes).
+
+- **The dashboard shows the room for your files:** the empty space plus other sites'
+  copies that make way for yours, instead of only the empty space. Copies of offline
+  sites, which can't make way, don't count.
+
 ## 1.7.0
 
 **What to update:** sites, under **Settings → Updates**; nodes follow. Existing access

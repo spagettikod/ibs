@@ -282,6 +282,8 @@ type Dashboard struct {
 		ObjectBytes   int64     `json:"object_bytes"`
 		HeldBlocks    int64     `json:"held_blocks"`
 		HeldBytes     int64     `json:"held_bytes"`
+		// Of those, copies of sites that are offline: they can't make way.
+		HeldOffline int64 `json:"held_offline"`
 		Location      *Location `json:"location,omitempty"`
 		Restored      int64     `json:"restored"`
 	} `json:"site"`
@@ -310,6 +312,8 @@ func (s *Site) Dashboard() (*Dashboard, error) {
 	s.DB.QueryRow(`SELECT COUNT(*) FROM buckets`).Scan(&d.Site.Buckets)
 	s.DB.QueryRow(`SELECT COUNT(*), COALESCE(SUM(size), 0) FROM objects`).Scan(&d.Site.Objects, &d.Site.ObjectBytes)
 	s.DB.QueryRow(`SELECT COUNT(*), COALESCE(SUM(size), 0) FROM held_blocks`).Scan(&d.Site.HeldBlocks, &d.Site.HeldBytes)
+	s.DB.QueryRow(`SELECT COALESCE(SUM(h.size), 0) FROM held_blocks h
+		WHERE h.owner NOT IN (SELECT site_id FROM peers WHERE online = 1)`).Scan(&d.Site.HeldOffline)
 	d.Replication = s.ReplicationHealth()
 	d.Capacity = s.IBSCapacity(d.Replication)
 	var err error
