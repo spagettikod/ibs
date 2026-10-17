@@ -365,6 +365,14 @@ Environment variables. All are optional.
   shows it, and you can start one by hand). A damaged or missing block is replaced from
   another copy. If no intact copy is left, the Scrub page names the affected
   files and reading them fails, instead of returning damaged data.
+- **When storage runs out.** Other sites' copies may use any free space on your site,
+  but your own files come first: when an upload needs room, your site pushes other
+  sites' copies away. Their owners place them on another site, or, if no site has room,
+  keep each file at two copies (the original and one elsewhere) until there's room
+  again. Their dashboard then says the IBS is running out of space. Copies of an offline
+  site are never pushed away. If nothing can make room, the upload fails with "storage
+  is full". So when the IBS fills up, files lose their third copy before anyone's
+  upload fails: add storage or a site in time.
 - **The site's index is backed up too.** The manager's database knows which files
   exist, which blocks they consist of, and where those blocks are. An encrypted copy of
   it goes to every storage node and every connected site, within about 15 seconds of

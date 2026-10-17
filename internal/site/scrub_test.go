@@ -167,7 +167,7 @@ func TestCopyChallenge(t *testing.T) {
 		s.DB.Exec(`INSERT INTO replicas(block_id, site_id, state, verified) VALUES(?, ?, 'ok', ?)`, id, peer, now)
 	}
 	s.StartScrub(true)
-	r := &scrubRun{s: s, id: s.currentScrub().ID, unreachable: map[string]bool{}, skipped: map[string]bool{}}
+	r := &scrubRun{s: s, id: s.currentScrub().ID, unreachable: map[string]bool{}}
 	local := map[string]string{ids[0]: "right", ids[1]: "right"}
 	results := make(chan copyCheckResult, 1)
 	results <- copyCheckResult{site: peer, ids: ids, reply: copyCheckReply{

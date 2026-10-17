@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"ibs/internal/blockstore"
 )
 
 // A site's scrub also checks the copies of its blocks on other sites: for
@@ -198,15 +200,19 @@ type copyCheckResult struct {
 // checkCopies asks every site holding copies of these blocks to check them,
 // in parallel. Offline sites are skipped.
 func (r *scrubRun) checkCopies(ctx context.Context, ids []string, nonce []byte) <-chan copyCheckResult {
+	return r.checkSites(ctx, r.s.copyHolders(ids), nonce)
+}
+
+// checkSites asks each site to check the given copies (site -> block ids).
+func (r *scrubRun) checkSites(ctx context.Context, holders map[string][]string, nonce []byte) <-chan copyCheckResult {
 	s := r.s
 	out := make(chan copyCheckResult)
-	holders := s.copyHolders(ids)
 	var wg sync.WaitGroup
 	for site, list := range holders {
 		var online bool
 		s.DB.QueryRow(`SELECT online FROM peers WHERE site_id = ?`, site).Scan(&online)
 		if !online {
-			r.siteSkipped(site, "it was offline, so its copies of this site's blocks weren't checked")
+			r.skip(site, list, "it was offline")
 			continue
 		}
 		wg.Add(1)
@@ -229,10 +235,12 @@ func (r *scrubRun) checkCopies(ctx context.Context, ids []string, nonce []byte) 
 						break
 					}
 				}
-				out <- copyCheckResult{site, chunk, reply, err}
 				if err != nil {
+					// The rest isn't checked now either.
+					out <- copyCheckResult{site, append(append([]string{}, chunk...), queue...), reply, err}
 					return
 				}
+				out <- copyCheckResult{site, chunk, reply, err}
 				if len(reply.Later) > 0 {
 					queue = append(append([]string{}, reply.Later...), queue...)
 					select {
@@ -255,7 +263,7 @@ func (r *scrubRun) compareCopies(ctx context.Context, results <-chan copyCheckRe
 		name := s.peerName(res.site)
 		if res.err != nil {
 			if ctx.Err() == nil {
-				r.siteSkipped(res.site, "it couldn't be reached, so its copies of this site's blocks weren't checked: "+res.err.Error())
+				r.skip(res.site, res.ids, "it couldn't be reached ("+res.err.Error()+")")
 			}
 			continue
 		}
@@ -294,13 +302,84 @@ func (r *scrubRun) compareCopies(ctx context.Context, results <-chan copyCheckRe
 	}
 }
 
-// siteSkipped reports once per scrub that a site's copies weren't checked.
-func (r *scrubRun) siteSkipped(site, detail string) {
-	if r.skipped[site] {
+// skip notes copies that couldn't be checked now, to check them at the end of
+// the scrub (catchUpBatch), and reports the site once per scrub.
+func (r *scrubRun) skip(site string, ids []string, why string) {
+	if r.catchingUp {
+		return // checked once more already; the report stays
+	}
+	for _, id := range ids {
+		r.s.DB.Exec(`INSERT OR IGNORE INTO scrub_skipped(scrub_id, site_id, block_id) VALUES(?, ?, ?)`, r.id, site, id)
+	}
+	var reported int
+	r.s.DB.QueryRow(`SELECT COUNT(*) FROM scrub_errors WHERE scrub_id = ? AND what = 'remote' AND problem = 'unreachable' AND block_id = ?`,
+		r.id, site).Scan(&reported)
+	if reported > 0 {
 		return
 	}
-	r.skipped[site] = true
-	r.report(ScrubError{What: "remote", Place: r.s.peerName(site), Problem: "unreachable", Outcome: "skipped", Detail: detail})
+	// block_id holds the site's id, so the entry can be found again.
+	r.report(ScrubError{What: "remote", BlockID: site, Place: r.s.peerName(site), Problem: "unreachable", Outcome: "skipped",
+		Detail: why + ", so its copies of this site's blocks weren't checked. They're checked at the end of the scrub if it's back by then."})
+}
+
+// catchUpBatch checks copies that were skipped because their site was
+// unreachable, on sites that are back. When a site's are all checked, its
+// "unreachable" report goes. It returns the copies it checked (0: done).
+func (r *scrubRun) catchUpBatch(ctx context.Context) int64 {
+	s := r.s
+	rows, err := s.DB.QueryContext(ctx, `SELECT k.site_id, k.block_id FROM scrub_skipped k JOIN peers p ON p.site_id = k.site_id
+		WHERE k.scrub_id = ? AND p.online = 1 ORDER BY k.site_id, k.block_id LIMIT ?`, r.id, 8*scrubBatch)
+	if err != nil {
+		return 0
+	}
+	holders := map[string][]string{}
+	var all []string
+	var n int64
+	for rows.Next() {
+		var site, id string
+		rows.Scan(&site, &id)
+		holders[site] = append(holders[site], id)
+		all = append(all, id)
+		n++
+	}
+	rows.Close()
+	if n == 0 {
+		// Sites whose skipped copies are all checked: their report goes.
+		s.DB.Exec(`DELETE FROM scrub_errors WHERE scrub_id = ? AND what = 'remote' AND problem = 'unreachable'
+			AND block_id NOT IN (SELECT site_id FROM scrub_skipped WHERE scrub_id = ?)`, r.id, r.id)
+		return 0
+	}
+	for site, ids := range holders {
+		for _, id := range ids {
+			s.DB.Exec(`DELETE FROM scrub_skipped WHERE scrub_id = ? AND site_id = ? AND block_id = ?`, r.id, site, id)
+		}
+	}
+	// This site's answers for the same challenge, from its own copies.
+	nonce := newNonce()
+	local := map[string]string{}
+	byNode := map[string][]string{}
+	for _, id := range all {
+		var node string
+		if s.DB.QueryRow(`SELECT node_id FROM blocks WHERE id = ? AND refs > 0`, id).Scan(&node) == nil && node != "" {
+			byNode[node] = append(byNode[node], id)
+		}
+	}
+	remote := r.checkSites(ctx, holders, nonce)
+	for node, ids := range byNode {
+		if st := s.nodeStore(node); st != nil {
+			for i := 0; i < len(ids); i += scrubBatch {
+				if res, err := s.verifyBlocks(ctx, st, blockstore.OwnNS, ids[i:min(i+scrubBatch, len(ids))], nonce); err == nil {
+					for id, a := range res.Answers {
+						local[id] = a
+					}
+				}
+			}
+		}
+	}
+	r.catchingUp = true
+	r.compareCopies(ctx, remote, local)
+	r.catchingUp = false
+	return n
 }
 
 func newNonce() []byte {

@@ -231,6 +231,15 @@ CREATE TABLE IF NOT EXISTS scrub_copies (
 	PRIMARY KEY (scrub_id, site_id)
 );
 
+-- Copies of this site's blocks a scrub couldn't check because their site was
+-- unreachable; checked at the end of the scrub if the site is back.
+CREATE TABLE IF NOT EXISTS scrub_skipped (
+	scrub_id INTEGER NOT NULL,
+	site_id  TEXT NOT NULL,
+	block_id TEXT NOT NULL,
+	PRIMARY KEY (scrub_id, site_id, block_id)
+);
+
 -- Short invite codes this site gave out: the number claimed on a relay, the
 -- words both sites derive their key from, and the full invite sent once the
 -- joining site proves it knows the words. used: the one attempt was made.
@@ -290,6 +299,8 @@ var migrations = []string{
 	// The upload in progress a block belongs to until it's committed ('' = none):
 	// the garbage collector leaves those alone, however long the upload takes.
 	`ALTER TABLE blocks ADD COLUMN upload TEXT NOT NULL DEFAULT ''`,
+	// Copies a finished scrub couldn't check: their site was down to the end.
+	`ALTER TABLE scrubs ADD COLUMN unchecked INTEGER NOT NULL DEFAULT 0`,
 }
 
 func Open(path string) (*sql.DB, error) {

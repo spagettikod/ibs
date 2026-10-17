@@ -16,6 +16,7 @@ const WHAT: Record<ScrubError['what'], string> = {
 const PHASE: Record<Scrub['phase'], string> = {
   database: 'Checking the database',
   own: 'Checking this site\'s blocks here and on other sites',
+  copies: 'Checking copies on sites that were unreachable',
   held: 'Checking copies kept for other sites that they haven\'t checked lately',
 }
 
@@ -26,8 +27,11 @@ export function scrubPercent(sc: Scrub) {
 /** One line on how a scrub went. */
 export function scrubResult(sc: Scrub) {
   if (sc.failed > 0) return `${sc.failed} ${sc.failed === 1 ? 'problem' : 'problems'} couldn't be repaired`
-  if (sc.repaired > 0) return `${sc.repaired} ${sc.repaired === 1 ? 'problem' : 'problems'} found and repaired`
-  return 'No problems found'
+  const fixed = sc.repaired > 0 ? `${sc.repaired} ${sc.repaired === 1 ? 'problem' : 'problems'} found and repaired` : ''
+  if (sc.unchecked > 0) {
+    return `Not complete: ${sc.unchecked.toLocaleString()} ${sc.unchecked === 1 ? 'copy' : 'copies'} on other sites weren't checked (a site was down)${fixed ? '; ' + fixed : ''}`
+  }
+  return fixed || 'No problems found'
 }
 
 function inDays(unix: number) {
@@ -77,7 +81,7 @@ export default function ScrubPage() {
               <Meter used={cur.checked + cur.copies} total={cur.total} />
               <span className="muted small">
                 {(cur.checked + cur.copies).toLocaleString()} of {cur.total.toLocaleString()} checked
-                ({cur.checked.toLocaleString()} here, {cur.copies.toLocaleString()} copies on other sites), {fmtBytes(cur.bytes + cur.copy_bytes)} read ·
+                ({cur.checked.toLocaleString()} here, {cur.copies.toLocaleString()} copies on other sites), {fmtBytes(cur.bytes)} of data ·
                 started {ago(cur.started)} {cur.manual ? 'by hand' : 'on schedule'} · {scrubResult(cur)}
               </span>
             </div>
@@ -85,7 +89,7 @@ export default function ScrubPage() {
         ) : data.last ? (
           <p>
             Last scrub {ago(data.last.finished ?? data.last.started)}{data.last.state === 'stopped' ? ' (stopped)' : ''}:{' '}
-            <b className={data.last.failed > 0 ? 'bad-text' : ''}>{scrubResult(data.last)}</b>.
+            <b className={data.last.failed > 0 ? 'bad-text' : data.last.unchecked > 0 ? 'warn-text' : ''}>{scrubResult(data.last)}</b>.
           </p>
         ) : (
           <p className="muted">No scrub has run yet.</p>
@@ -136,7 +140,7 @@ export default function ScrubPage() {
                 <tr key={h.id}>
                   <td>{ago(h.started)}<div className="muted small">{h.manual ? 'by hand' : 'on schedule'}</div></td>
                   <td>{h.finished ? fmtDuration(h.finished - h.started) : h.state === 'paused' ? 'paused' : 'running'}</td>
-                  <td className="num">{fmtBytes(h.bytes + h.copy_bytes)}<div className="muted small">{h.checked.toLocaleString()} here{h.copies > 0 && `, ${h.copies.toLocaleString()} elsewhere`}</div></td>
+                  <td className="num">{fmtBytes(h.bytes)}<div className="muted small">{h.checked.toLocaleString()} here{h.copies > 0 && `, ${h.copies.toLocaleString()} elsewhere`}</div></td>
                   <td>{h.state === 'stopped' ? <span className="muted">Stopped · </span> : null}{scrubResult(h)}</td>
                 </tr>
               ))}

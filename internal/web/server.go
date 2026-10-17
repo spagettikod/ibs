@@ -30,7 +30,7 @@ import (
 
 const (
 	sessionCookie = "ibs_session"
-	sessionTTL    = 12 * time.Hour
+	sessionTTL    = 14 * 24 * time.Hour // two weeks; changing the password ends all sessions
 )
 
 type Server struct {

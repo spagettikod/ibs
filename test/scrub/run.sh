@@ -6,7 +6,8 @@
 #     exact bytes answer, and has damaged ones copied again,
 #   - a block with no intact copy left is reported with the file using it, and
 #     downloading that file fails instead of returning damaged data,
-#   - a scrub can be paused, resumed and stopped.
+#   - a scrub can be paused, resumed and stopped,
+#   - a scrub catches up on the copies of a site that was down for a while.
 # Needs: docker and the "ibs" image.
 #
 #   docker build -t ibs . && test/scrub/run.sh
@@ -26,7 +27,7 @@ site() { # name alias [docker args...]
     -e IBS_SITE_NAME=$alias -e IBS_ADMIN_PASSWORD=test-password -e IBS_STORAGE_LIMIT=200M -e IBS_CHECK_INTERVAL=2s \
     -e IBS_PEER_ADVERTISE=$alias:7443 "$@" ibs >/dev/null
 }
-site $ID-a site-a
+site $ID-a site-a -e IBS_SCRUB_RATE=2M # slow enough for a site to come back during its scrub
 site $ID-b site-b
 site $ID-c site-c -e IBS_SCRUB_RATE=1M # slow with its own 50 MB, to pause and stop it
 port() { docker port $1 8080/tcp | head -1 | cut -d: -f2; }
@@ -106,5 +107,29 @@ check "downloading the file fails"             bash -c "[ \"\$(download)\" != 20
 
 check "the schedule can be changed"            bash -c "api $ID-a PUT /api/scrub/settings '{\"interval_days\":7}' | grep -q '\"interval_days\":7'"
 check "a monthly scrub is scheduled by default" bash -c "api $ID-b GET /api/scrub | grep -q '\"interval_days\":30,\"next_due\":[0-9]'"
+
+echo "A site is down during a scrub"
+api $ID-a POST /api/buckets '{"name":"big"}' >/dev/null
+head -c 30000000 /dev/urandom > "$WORK/big.bin"
+curl -s -b "$WORK/jar-$ID-a" -H 'X-IBS: 1' -F "file=@$WORK/big.bin;filename=big.bin" "http://127.0.0.1:$(port $ID-a)/api/buckets/big/upload" >/dev/null
+b_holds_big() { [ "$(api $ID-b GET /api/peers | tr '{' '\n' | grep '"name":"site-a"' | sed -n 's/.*"held_blocks":\([0-9]*\).*/\1/p')" -ge 8 ]; }
+export -f b_holds_big
+check "site-b holds copies of the new file"    wait_for 60 b_holds_big
+docker stop $ID-b >/dev/null
+check "site-a sees site-b go"                  wait_for 30 bash -c "api $ID-a GET /api/peers | tr '{' '\n' | grep '\"name\":\"site-b\"' | grep -q '\"online\":false'"
+api $ID-a POST /api/scrub/start >/dev/null
+sleep 3
+docker start $ID-b >/dev/null
+check "site-a's scrub finishes"                wait_for 180 scrub_done $ID-a
+check "it caught up with site-b's copies"      bash -c "api $ID-a GET /api/scrub/copies | grep -q '\"name\":\"site-b\",\"copies\":[0-9]*,\"scrubbed\":[1-9][0-9]*,\"checked\":[1-9]'"
+check "and drops the note that it was down"    bash -c "! api $ID-a GET /api/scrub | grep -q '\"problem\":\"unreachable\"'"
+
+docker stop $ID-b >/dev/null
+check "site-b down for a whole scrub"          wait_for 30 bash -c "api $ID-a GET /api/peers | tr '{' '\n' | grep '\"name\":\"site-b\"' | grep -q '\"online\":false'"
+api $ID-a POST /api/scrub/start >/dev/null
+check "the scrub finishes"                     wait_for 180 scrub_done $ID-a
+check "but says it isn't complete"             bash -c "api $ID-a GET /api/scrub | grep -q '\"last\":{[^}]*\"unchecked\":[1-9]'"
+check "and keeps the note that site-b was down" bash -c "api $ID-a GET /api/scrub | grep -q '\"problem\":\"unreachable\"'"
+docker start $ID-b >/dev/null
 
 finish

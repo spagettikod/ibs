@@ -3,6 +3,17 @@
 Each release says what to update and which launcher and relay it works with: IBS,
 the launcher and the relay are released separately.
 
+## Unreleased
+
+- **A scrub catches up** on copies it couldn't check because their site was down: at
+  the end it checks them if the site is back, and the "couldn't be reached" note goes.
+- **A scrub that couldn't check everything says so** ("Not complete"), on the Scrub page
+  and the dashboard, instead of looking clean. The data checked shows your data's size,
+  not all copies added up.
+- The dashboard's scrub tile says when the last scrub was stopped.
+- **Dashboard messages say first what they mean for your files,** then why.
+- You stay logged in for two weeks (was 12 hours).
+
 ## 1.6.1
 
 **What to update:** sites, under **Settings → Updates**; nodes follow.

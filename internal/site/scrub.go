@@ -58,7 +58,7 @@ type Scrub struct {
 	Finished int64  `json:"finished,omitempty"`
 	State    string `json:"state"` // running | paused | done | stopped
 	Manual   bool   `json:"manual"`
-	Phase    string `json:"phase"` // database | own | held
+	Phase    string `json:"phase"` // database | own | copies | held
 	Total    int64  `json:"total"` // blocks to check
 	Checked  int64  `json:"checked"`
 	Bytes    int64  `json:"bytes"`
@@ -67,6 +67,8 @@ type Scrub struct {
 	// Copies of this site's blocks checked on other sites, and the bytes read there.
 	Copies    int64 `json:"copies"`
 	CopyBytes int64 `json:"copy_bytes"`
+	// Copies it couldn't check because their site was down until the end.
+	Unchecked int64 `json:"unchecked"`
 }
 
 // ScrubError is something a scrub found.
@@ -92,11 +94,11 @@ type ScrubInfo struct {
 	Unresolved   int          `json:"unresolved"` // problems found that are still there
 }
 
-const scrubCols = `id, started, finished, state, manual, phase, total, checked, bytes, repaired, failed, copies, copy_bytes`
+const scrubCols = `id, started, finished, state, manual, phase, total, checked, bytes, repaired, failed, copies, copy_bytes, unchecked`
 
 func scanScrub(row interface{ Scan(...any) error }) (Scrub, error) {
 	var sc Scrub
-	err := row.Scan(&sc.ID, &sc.Started, &sc.Finished, &sc.State, &sc.Manual, &sc.Phase, &sc.Total, &sc.Checked, &sc.Bytes, &sc.Repaired, &sc.Failed, &sc.Copies, &sc.CopyBytes)
+	err := row.Scan(&sc.ID, &sc.Started, &sc.Finished, &sc.State, &sc.Manual, &sc.Phase, &sc.Total, &sc.Checked, &sc.Bytes, &sc.Repaired, &sc.Failed, &sc.Copies, &sc.CopyBytes, &sc.Unchecked)
 	return sc, err
 }
 
@@ -176,6 +178,7 @@ func (s *Site) StartScrub(manual bool) error {
 	s.DB.Exec(`DELETE FROM scrubs WHERE id NOT IN (SELECT id FROM scrubs ORDER BY id DESC LIMIT ?)`, scrubKeep)
 	s.DB.Exec(`DELETE FROM scrub_errors WHERE scrub_id NOT IN (SELECT id FROM scrubs)`)
 	s.DB.Exec(`DELETE FROM scrub_copies WHERE scrub_id NOT IN (SELECT id FROM scrubs)`)
+	s.DB.Exec(`DELETE FROM scrub_skipped WHERE scrub_id NOT IN (SELECT id FROM scrubs WHERE state IN ('running', 'paused'))`)
 	s.log.Info("scrub started", "manual", manual, "blocks", blocks, "copies_elsewhere", copies, "kept_for_others", held)
 	s.wakeScrub()
 	s.notify(TopicScrub)
@@ -272,7 +275,7 @@ func (s *Site) scrubEvent(force bool) {
 // runScrub works through a scrub batch by batch until it is done, paused,
 // stopped, or the site shuts down. Progress is saved after every batch.
 func (s *Site) runScrub(ctx context.Context, id int64) {
-	r := &scrubRun{s: s, id: id, unreachable: map[string]bool{}, skipped: map[string]bool{}}
+	r := &scrubRun{s: s, id: id, unreachable: map[string]bool{}}
 	rate := scrubRate()
 	for ctx.Err() == nil {
 		var state, phase, cursor string
@@ -288,6 +291,11 @@ func (s *Site) runScrub(ctx context.Context, id int64) {
 		case "own":
 			n, bytes, cursor = r.ownBatch(ctx, cursor)
 			if n == 0 {
+				next = "copies"
+			}
+		case "copies":
+			// Copies skipped while their site was unreachable, if it's back.
+			if r.catchUpBatch(ctx) == 0 {
 				next = "held"
 			}
 		case "held":
@@ -305,11 +313,15 @@ func (s *Site) runScrub(ctx context.Context, id int64) {
 		case "":
 			s.DB.Exec(`UPDATE scrubs SET cursor = ?, checked = checked + ?, bytes = bytes + ? WHERE id = ? AND state = 'running'`, cursor, n, bytes, id)
 		case "done":
-			s.DB.Exec(`UPDATE scrubs SET state = 'done', finished = ?, checked = checked + ?, bytes = bytes + ? WHERE id = ? AND state = 'running'`,
-				time.Now().Unix(), n, bytes, id)
+			s.DB.Exec(`UPDATE scrubs SET state = 'done', finished = ?, checked = checked + ?, bytes = bytes + ?,
+				unchecked = (SELECT COUNT(*) FROM scrub_skipped WHERE scrub_id = ?) WHERE id = ? AND state = 'running'`,
+				time.Now().Unix(), n, bytes, id, id)
 			sc := s.lastScrub()
-			if sc != nil {
-				s.log.Info("scrub done", "checked", sc.Checked, "repaired", sc.Repaired, "failed", sc.Failed)
+			if sc != nil && sc.Unchecked > 0 {
+				s.log.Warn("scrub done, but not complete: copies on sites that were down weren't checked", "checked", sc.Checked,
+					"copies", sc.Copies, "unchecked", sc.Unchecked, "repaired", sc.Repaired, "failed", sc.Failed)
+			} else if sc != nil {
+				s.log.Info("scrub done", "checked", sc.Checked, "copies", sc.Copies, "repaired", sc.Repaired, "failed", sc.Failed)
 			}
 			s.scrubEvent(true)
 			return
@@ -326,7 +338,7 @@ type scrubRun struct {
 	s           *Site
 	id          int64
 	unreachable map[string]bool // nodes already reported as unreachable in this run
-	skipped     map[string]bool // sites whose copies weren't checked, already reported
+	catchingUp  bool            // in catchUpBatch: what fails now isn't noted again
 }
 
 func (r *scrubRun) report(e ScrubError) {
@@ -712,6 +724,9 @@ func (s *Site) scrubErrors(id int64) []ScrubError {
 	for rows.Next() {
 		var e ScrubError
 		rows.Scan(&e.At, &e.What, &e.BlockID, &e.Place, &e.Problem, &e.Outcome, &e.Detail)
+		if e.What == "remote" && e.Problem == "unreachable" {
+			e.BlockID = "" // holds the site's id (skip)
+		}
 		out = append(out, e)
 	}
 	rows.Close()

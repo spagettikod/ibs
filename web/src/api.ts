@@ -143,8 +143,8 @@ export type UpdatesInfo = {
 
 export type Scrub = {
   id: number; started: number; finished?: number; state: 'running' | 'paused' | 'done' | 'stopped'; manual: boolean
-  phase: 'database' | 'own' | 'held'; total: number; checked: number; bytes: number; repaired: number; failed: number
-  copies: number; copy_bytes: number
+  phase: 'database' | 'own' | 'copies' | 'held'; total: number; checked: number; bytes: number; repaired: number; failed: number
+  copies: number; copy_bytes: number; unchecked: number
 }
 export type ScrubError = {
   at: number; what: 'block' | 'remote' | 'held' | 'database' | 'copy' | 'node'; block_id?: string; place?: string

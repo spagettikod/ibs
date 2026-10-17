@@ -10,7 +10,10 @@ type Item = { level: 'bad' | 'warn' | 'info'; text: string; href: string; link: 
 function attention(d: Dashboard, tls?: TLSStatus, updates?: UpdatesInfo, scrub?: ScrubInfo): Item[] {
   const out: Item[] = []
   if (scrub && scrub.unresolved > 0) {
-    out.push({ level: 'bad', text: `The scrub found ${scrub.unresolved} ${scrub.unresolved === 1 ? 'problem' : 'problems'} it couldn't repair`, href: '#/scrub', link: 'Scrub' })
+    out.push({ level: 'bad', text: `Some files can't be read: the scrub found ${scrub.unresolved} damaged ${scrub.unresolved === 1 ? 'block' : 'blocks'} with no intact copy left`, href: '#/scrub', link: 'Scrub' })
+  }
+  if (scrub?.last && scrub.last.unchecked > 0 && !scrub.current) {
+    out.push({ level: 'warn', text: `Not all copies were checked: ${scrub.last.unchecked.toLocaleString()} copies on other sites were skipped in the last scrub because their site was down`, href: '#/scrub', link: 'Scrub' })
   }
   if (updates?.newer) {
     const ready = updates.versions.some((v) => v.version === updates.newer)
@@ -20,41 +23,41 @@ function attention(d: Dashboard, tls?: TLSStatus, updates?: UpdatesInfo, scrub?:
     const days = tls.not_after ? (new Date(tls.not_after).getTime() - Date.now()) / 86400000 : undefined
     if (tls.error && (days === undefined || days < 14)) {
       out.push({ level: days === undefined || days < 3 ? 'bad' : 'warn', text: days === undefined
-        ? 'No HTTPS certificate yet: the last request failed'
-        : `The HTTPS certificate expires in ${Math.floor(days)} days and renewing it failed`, href: '#/settings', link: 'Settings' })
+        ? 'HTTPS doesn\'t work yet: getting a certificate failed'
+        : `HTTPS stops working in ${Math.floor(days)} days: renewing the certificate failed`, href: '#/settings', link: 'Settings' })
     }
   }
   const r = d.replication
   const c = d.ibs_capacity
   for (const n of d.nodes ?? []) {
-    if (n.lost) out.push({ level: 'bad', text: `Storage node ${n.name} is lost; its blocks are being restored on other nodes`, href: '#/nodes', link: 'Nodes' })
-    else if (!n.online) out.push({ level: 'warn', text: `Storage node ${n.name} is offline (seen ${ago(n.last_seen)})`, href: '#/nodes', link: 'Nodes' })
+    if (n.lost) out.push({ level: 'bad', text: `Files on storage node ${n.name} are being restored on your other nodes: the node has been gone too long`, href: '#/nodes', link: 'Nodes' })
+    else if (!n.online) out.push({ level: 'warn', text: `Files on storage node ${n.name} are read from other sites for now: the node is offline (seen ${ago(n.last_seen)})`, href: '#/nodes', link: 'Nodes' })
   }
   if (r.missing_locally > 0) {
-    out.push({ level: 'warn', text: `${r.missing_locally} blocks are being restored to this site from other sites`, href: '#/nodes', link: 'Nodes' })
+    out.push({ level: 'warn', text: `${r.missing_locally.toLocaleString()} blocks are read from other sites for now: they're missing here and being restored`, href: '#/nodes', link: 'Nodes' })
   }
   // Other sites' copies make way for this site's own files, so they count as room.
   const room = d.site.free + d.site.held_bytes
   if (d.site.capacity > 0 && room < d.site.capacity * 0.05) {
-    out.push({ level: 'bad', text: `Storage is almost full: ${fmtBytes(room)} left for this site's files`, href: '#/nodes', link: 'Nodes' })
+    out.push({ level: 'bad', text: `Uploads will soon fail: only ${fmtBytes(room)} is left for this site's files`, href: '#/nodes', link: 'Nodes' })
   }
   for (const rl of d.relays ?? []) {
-    if (!rl.connected) out.push({ level: 'warn', text: `Relay ${rl.name} is not connected`, href: '#/network', link: 'The Known Universe' })
+    if (!rl.connected) out.push({ level: 'warn', text: `Sites that reach this site only through relay ${rl.name} can't connect: the relay isn't connected`, href: '#/network', link: 'The Known Universe' })
   }
   for (const p of d.peers ?? []) {
-    if (!p.online) out.push({ level: 'warn', text: `Site ${p.name} is offline (seen ${ago(p.last_seen)})`, href: '#/network', link: 'The Known Universe' })
+    if (!p.online) out.push({ level: 'warn', text: `Your copies on ${p.name} can't be reached, and new copies wait for it: the site is offline (seen ${ago(p.last_seen)})`, href: '#/network', link: 'The Known Universe' })
   }
   if (c.sites > 0 && c.sites < c.copies) {
-    out.push({ level: 'warn', text: `Files have ${c.sites} of ${c.copies} copies on other sites: only ${c.sites} other ${c.sites === 1 ? 'site is' : 'sites are'} online`, href: '#/network', link: 'The Known Universe' })
+    out.push({ level: 'warn', text: `Your files aren't fully protected: they have ${c.sites} of ${c.copies} copies on other sites, because only ${c.sites} other ${c.sites === 1 ? 'site is' : 'sites are'} online`, href: '#/network', link: 'The Known Universe' })
   } else if (r.no_room > 0 || (!c.fits && r.under_replicated > 0)) {
-    out.push({ level: 'warn', text: `The IBS is running out of space: ${r.under_replicated} blocks have fewer copies on other sites than they should. They get them back when there is room.`, href: '#/network', link: 'The Known Universe' })
+    out.push({ level: 'warn', text: `Your files aren't fully protected: ${r.under_replicated.toLocaleString()} blocks lack copies because the IBS is running out of space. They get them when there's room.`, href: '#/network', link: 'The Known Universe' })
   } else if (r.under_replicated > 0) {
-    out.push({ level: 'info', text: `${r.under_replicated} blocks are being copied to other sites`, href: '#/buckets', link: 'Buckets' })
+    out.push({ level: 'info', text: `${r.under_replicated.toLocaleString()} blocks aren't protected yet: they're being copied to other sites`, href: '#/buckets', link: 'Buckets' })
   }
   if (!d.site.peer_advertise && (d.relays ?? []).length === 0) {
-    out.push({ level: 'warn', text: 'Other sites cannot reach this site: add a relay', href: '#/network', link: 'The Known Universe' })
+    out.push({ level: 'warn', text: 'Your files get no copies: other sites can\'t reach this site. Add a relay.', href: '#/network', link: 'The Known Universe' })
   } else if ((d.peers ?? []).length === 0) {
-    out.push({ level: 'warn', text: 'No backups yet: this site isn\'t connected to another site, so no copies are made', href: '#/network', link: 'The Known Universe' })
+    out.push({ level: 'warn', text: 'Your files get no copies: this site isn\'t connected to another site yet', href: '#/network', link: 'The Known Universe' })
   }
   const rank = { bad: 0, warn: 1, info: 2 }
   return out.sort((a, b) => rank[a.level] - rank[b.level])
@@ -215,16 +218,19 @@ function ScrubTile({ info }: { info?: ScrubInfo }) {
       <a className="tile-link" href="#/scrub">
         <Stat label="Scrub" value={cur.state === 'paused' ? `Paused at ${scrubPercent(cur)}%` : `${scrubPercent(cur)}%`}
           tone={cur.failed > 0 ? 'bad' : undefined}
-          sub={<><Meter used={cur.checked} total={cur.total} />{cur.checked.toLocaleString()} of {cur.total.toLocaleString()} blocks checked</>} />
+          sub={<><Meter used={cur.checked + cur.copies} total={cur.total} />{(cur.checked + cur.copies).toLocaleString()} of {cur.total.toLocaleString()} checked</>} />
       </a>
     )
   }
   const last = info.last
   return (
     <a className="tile-link" href="#/scrub">
-      <Stat label="Scrub" value={!last ? 'Not yet' : info.unresolved > 0 ? 'Problems' : last.repaired > 0 ? 'Repaired' : 'Clean'}
-        tone={!last ? undefined : info.unresolved > 0 ? 'bad' : 'ok'}
-        sub={last ? `${scrubResult(last)}, ${ago(last.finished ?? last.started)}` : 'No scrub has run yet'} />
+      <Stat label="Scrub" value={!last ? 'Not yet' : info.unresolved > 0 ? 'Problems' : last.state === 'stopped' ? 'Stopped'
+        : last.unchecked > 0 ? 'Not complete' : last.repaired > 0 ? 'Repaired' : 'Clean'}
+        tone={!last ? undefined : info.unresolved > 0 ? 'bad' : last.state === 'stopped' || last.unchecked > 0 ? 'warn' : 'ok'}
+        sub={!last ? 'No scrub has run yet' : last.state === 'stopped'
+          ? `Stopped ${ago(last.finished ?? last.started)} at ${scrubPercent(last)}%; start a new one on the Scrub page`
+          : `${scrubResult(last)}, ${ago(last.finished ?? last.started)}`} />
     </a>
   )
 }
