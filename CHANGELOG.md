@@ -9,7 +9,6 @@ the launcher and the relay are released separately.
   would misread block going back to it (so far: limited access keys, from 1.7.0).
   Versions a site can never go back to are removed by themselves once the running
   version has started fine; uploading one is refused, saying why.
-
 - **The web interface stays responsive while many files are uploaded:** the dashboard's
   copy counts take one pass over the blocks instead of five (with 50,000 files about
   0.5 s instead of 1.3 s), pages refresh at most every 2 seconds during a stream of
