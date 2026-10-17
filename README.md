@@ -374,8 +374,8 @@ Environment variables. All are optional.
   See [Disk space](#disk-space).
 - **The site's index is backed up too.** The manager's database knows which files
   exist, which blocks they consist of, and where those blocks are. An encrypted copy of
-  it goes to every storage node and every connected site, within about 15 seconds of
-  each change.
+  it goes to every storage node and every connected site, about 15 seconds after
+  changes stop, and at least once a minute while uploads keep coming.
 - **Connections are private.** Sites, nodes and the manager talk over mutual TLS, and
   each side checks the other's key. Sites connect directly when they can. Otherwise
   their traffic goes through a relay, which can't read it.

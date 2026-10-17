@@ -268,24 +268,24 @@ func (s *Site) SessionKey() []byte {
 
 type Dashboard struct {
 	Site struct {
-		SiteID        string    `json:"site_id"`
-		Name          string    `json:"name"`
-		UpSince       int64     `json:"up_since"`
-		Capacity      int64     `json:"capacity"`
-		Free          int64     `json:"free"`
-		Offered       int64     `json:"offered"` // free space offered to other sites' copies
-		Generation    int64     `json:"generation"`
-		PeerAdvertise string    `json:"peer_advertise"`
-		WebHost       string    `json:"web_host,omitempty"` // guessed LAN host (NoteWebHost)
-		Buckets       int64     `json:"buckets"`
-		Objects       int64     `json:"objects"`
-		ObjectBytes   int64     `json:"object_bytes"`
-		HeldBlocks    int64     `json:"held_blocks"`
-		HeldBytes     int64     `json:"held_bytes"`
+		SiteID        string `json:"site_id"`
+		Name          string `json:"name"`
+		UpSince       int64  `json:"up_since"`
+		Capacity      int64  `json:"capacity"`
+		Free          int64  `json:"free"`
+		Offered       int64  `json:"offered"` // free space offered to other sites' copies
+		Generation    int64  `json:"generation"`
+		PeerAdvertise string `json:"peer_advertise"`
+		WebHost       string `json:"web_host,omitempty"` // guessed LAN host (NoteWebHost)
+		Buckets       int64  `json:"buckets"`
+		Objects       int64  `json:"objects"`
+		ObjectBytes   int64  `json:"object_bytes"`
+		HeldBlocks    int64  `json:"held_blocks"`
+		HeldBytes     int64  `json:"held_bytes"`
 		// Of those, copies of sites that are offline: they can't make way.
-		HeldOffline int64 `json:"held_offline"`
-		Location      *Location `json:"location,omitempty"`
-		Restored      int64     `json:"restored"`
+		HeldOffline int64     `json:"held_offline"`
+		Location    *Location `json:"location,omitempty"`
+		Restored    int64     `json:"restored"`
 	} `json:"site"`
 	Replication ReplicationHealth `json:"replication"`
 	Capacity    IBSCapacity       `json:"ibs_capacity"`
@@ -363,11 +363,7 @@ func (s *Site) IBSCapacity(h ReplicationHealth) IBSCapacity {
 		free = append(free, max(p.free, 0))
 	}
 	// Blocks missing both copies need two different sites; the others one.
-	var both, one int64
-	s.DB.QueryRow(`SELECT COALESCE(SUM(CASE WHEN n = 0 THEN size END), 0), COALESCE(SUM(CASE WHEN n > 0 THEN size END), 0) FROM (
-			SELECT b.size, (SELECT COUNT(*) FROM replicas r WHERE r.block_id = b.id AND r.state = 'ok') AS n
-			FROM blocks b WHERE b.refs > 0)
-		WHERE n < ?`, Copies).Scan(&both, &one)
+	both, one := h.noCopy, h.someCopies
 	c.Fits = c.Sites >= Copies && one+Copies*both <= c.Free && both <= replicable(free, Copies)
 	return c
 }

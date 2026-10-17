@@ -18,7 +18,13 @@ const (
 )
 
 // coalesceDelay batches bursts (e.g. a multi-block upload) into one event.
-const coalesceDelay = 150 * time.Millisecond
+// During a long stream of changes (many uploads) events go out at most every
+// eventInterval: each makes the web interface reload pages whose queries
+// compete with the uploads for the disk.
+const (
+	coalesceDelay = 150 * time.Millisecond
+	eventInterval = 2 * time.Second
+)
 
 // hub fans change notifications out to subscribers. Topics raised close
 // together are merged so subscribers see at most one event per delay.
@@ -27,6 +33,7 @@ type hub struct {
 	subs    map[chan []string]struct{}
 	pending map[string]bool
 	timer   *time.Timer
+	last    time.Time // when events last went out
 }
 
 func newHub() *hub {
@@ -43,7 +50,7 @@ func (h *hub) notify(topics ...string) {
 		h.pending[t] = true
 	}
 	if h.timer == nil {
-		h.timer = time.AfterFunc(coalesceDelay, h.flush)
+		h.timer = time.AfterFunc(max(coalesceDelay, eventInterval-time.Since(h.last)), h.flush)
 	}
 }
 
@@ -51,6 +58,7 @@ func (h *hub) flush() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.timer = nil
+	h.last = time.Now()
 	topics := make([]string, 0, len(h.pending))
 	for t := range h.pending {
 		topics = append(topics, t)

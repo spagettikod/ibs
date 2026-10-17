@@ -568,8 +568,20 @@ func (s *Site) snapshot(ctx context.Context) ([]byte, error) {
 //
 // The same snapshot also goes to every online storage node of this site, so
 // the site can be restored from its own nodes (even without any peers).
+// backupQuiet and backupMax pace metadata backups during a stream of changes
+// (many uploads): each copies the whole database, which competes with the
+// uploads for the disk. A backup goes out once changes paused for backupQuiet,
+// and at least every backupMax while they keep coming.
+const (
+	backupQuiet = 15 * time.Second
+	backupMax   = time.Minute
+)
+
 func (s *Site) backupOnce(ctx context.Context) {
-	if s.dirty.Swap(false) {
+	quiet := time.Since(time.Unix(0, s.dirtyAt.Load())) >= backupQuiet
+	due := time.Since(time.Unix(0, s.backupAt.Load())) >= backupMax
+	if (quiet || due) && s.dirty.Swap(false) {
+		s.backupAt.Store(time.Now().UnixNano())
 		gen := s.SettingInt("generation") + 1
 		db.SetSetting(s.DB, "generation", strconv.FormatInt(gen, 10))
 	}
@@ -672,35 +684,35 @@ type ReplicationHealth struct {
 	CopiesPossible int64 `json:"copies_possible"`
 	Copying        int64 `json:"copying"`
 	CopyingBytes   int64 `json:"copying_bytes"` // still to send for those
+	// For IBSCapacity: bytes of blocks with no copy elsewhere yet, and with
+	// some but fewer than Copies.
+	noCopy, someCopies int64
 }
 
 func (s *Site) ReplicationHealth() ReplicationHealth {
 	h := ReplicationHealth{NoRoom: s.noRoom.Load()}
 	countedSince := time.Now().Add(-s.cfg.PeerGrace).Unix()
-	s.DB.QueryRow(`SELECT COUNT(*), COALESCE(SUM(size), 0) FROM blocks WHERE refs > 0`).Scan(&h.Blocks, &h.Bytes)
-	s.DB.QueryRow(`SELECT COUNT(*) FROM blocks WHERE refs > 0 AND node_id = ''`).Scan(&h.MissingLocally)
-	s.DB.QueryRow(`SELECT COUNT(*) FROM replicas WHERE state = 'delete'`).Scan(&h.PendingDeletes)
-	s.DB.QueryRow(`SELECT COUNT(*), COALESCE(SUM((replication - n) * size), 0) FROM (
-			SELECT bk.replication, b.size,
-				(SELECT COUNT(*) FROM replicas r JOIN peers p ON p.site_id = r.site_id
-					WHERE r.block_id = b.id AND r.state = 'ok' AND p.last_seen >= ?) AS n
-			FROM blocks b JOIN buckets bk ON bk.name = b.bucket WHERE b.refs > 0)
-		WHERE n < replication`, countedSince).Scan(&h.UnderReplicated, &h.PendingBytes)
-	s.DB.QueryRow(`SELECT COUNT(*) FROM (
-			SELECT bk.replication,
-				(SELECT COUNT(*) FROM replicas r JOIN peers p ON p.site_id = r.site_id
-					WHERE r.block_id = b.id AND r.state = 'ok' AND p.online = 1) AS n
-			FROM blocks b JOIN buckets bk ON bk.name = b.bucket WHERE b.refs > 0)
-		WHERE n > replication`).Scan(&h.OverReplicated)
 	var sites int64
 	s.DB.QueryRow(`SELECT COUNT(*) FROM peers WHERE last_seen >= ?`, countedSince).Scan(&sites)
-	s.DB.QueryRow(`SELECT COALESCE(SUM(min(n, want)), 0), COALESCE(SUM(want), 0), COUNT(CASE WHEN n < want THEN 1 END),
-			COALESCE(SUM(CASE WHEN n < want THEN (want - n) * size END), 0) FROM (
-			SELECT min(bk.replication, ?) AS want, b.size,
-				(SELECT COUNT(*) FROM replicas r JOIN peers p ON p.site_id = r.site_id
-					WHERE r.block_id = b.id AND r.state = 'ok' AND p.last_seen >= ?) AS n
-			FROM blocks b JOIN buckets bk ON bk.name = b.bucket WHERE b.refs > 0)`, sites, countedSince).
-		Scan(&h.CopiesMade, &h.CopiesPossible, &h.Copying, &h.CopyingBytes)
+	s.DB.QueryRow(`SELECT COUNT(*) FROM replicas WHERE state = 'delete'`).Scan(&h.PendingDeletes)
+	// Everything in one pass over the blocks, with the copies of each counted
+	// once: on sites seen within the grace period (counted), online, and any.
+	s.DB.QueryRow(`WITH n AS (
+			SELECT r.block_id, SUM(p.last_seen >= ?) AS counted, SUM(p.online = 1) AS online, COUNT(*) AS any
+			FROM replicas r JOIN peers p ON p.site_id = r.site_id WHERE r.state = 'ok' GROUP BY r.block_id),
+		x AS (
+			SELECT b.size, b.node_id, bk.replication AS repl, min(bk.replication, ?) AS want,
+				COALESCE(n.counted, 0) AS c, COALESCE(n.online, 0) AS o, COALESCE(n.any, 0) AS a
+			FROM blocks b JOIN buckets bk ON bk.name = b.bucket LEFT JOIN n ON n.block_id = b.id WHERE b.refs > 0)
+		SELECT COUNT(*), COALESCE(SUM(size), 0), COUNT(CASE WHEN node_id = '' THEN 1 END),
+			COUNT(CASE WHEN c < repl THEN 1 END), COALESCE(SUM(CASE WHEN c < repl THEN (repl - c) * size END), 0),
+			COUNT(CASE WHEN o > repl THEN 1 END),
+			COALESCE(SUM(min(c, want)), 0), COALESCE(SUM(want), 0), COUNT(CASE WHEN c < want THEN 1 END),
+			COALESCE(SUM(CASE WHEN c < want THEN (want - c) * size END), 0),
+			COALESCE(SUM(CASE WHEN a = 0 THEN size END), 0), COALESCE(SUM(CASE WHEN a > 0 AND a < ? THEN size END), 0)
+		FROM x`, countedSince, sites, Copies).
+		Scan(&h.Blocks, &h.Bytes, &h.MissingLocally, &h.UnderReplicated, &h.PendingBytes, &h.OverReplicated,
+			&h.CopiesMade, &h.CopiesPossible, &h.Copying, &h.CopyingBytes, &h.noCopy, &h.someCopies)
 	return h
 }
 

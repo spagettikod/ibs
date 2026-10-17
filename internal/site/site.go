@@ -52,6 +52,8 @@ type Site struct {
 	accessKeys sync.Map // access key id -> secret
 
 	dirty     atomic.Bool
+	dirtyAt   atomic.Int64 // when metadata last changed (unix ns)
+	backupAt  atomic.Int64 // when a metadata backup generation was last cut (unix ns)
 	reconcile chan string
 
 	events    *hub
@@ -237,6 +239,7 @@ func (s *Site) CheckAdminPassword(pw string) bool {
 func randomToken() string { return keys.RandomToken(24) }
 
 func (s *Site) markDirty() {
+	s.dirtyAt.Store(time.Now().UnixNano())
 	s.dirty.Store(true)
 	s.notify(TopicData)
 }

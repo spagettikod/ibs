@@ -165,12 +165,11 @@ func (s *Site) ListBuckets() ([]BucketInfo, error) {
 		return nil, err
 	}
 	pending := map[string]int64{}
-	pr, err := s.DB.Query(`SELECT bucket, COUNT(*) FROM (
-			SELECT b.bucket, bk.replication,
-				(SELECT COUNT(*) FROM replicas r JOIN peers p ON p.site_id = r.site_id
-					WHERE r.block_id = b.id AND r.state = 'ok' AND p.last_seen >= ?) AS n
-			FROM blocks b JOIN buckets bk ON bk.name = b.bucket WHERE b.refs > 0)
-		WHERE n < replication GROUP BY bucket`, time.Now().Add(-s.cfg.PeerGrace).Unix())
+	pr, err := s.DB.Query(`WITH n AS (
+			SELECT r.block_id, COUNT(*) AS n FROM replicas r JOIN peers p ON p.site_id = r.site_id
+			WHERE r.state = 'ok' AND p.last_seen >= ? GROUP BY r.block_id)
+		SELECT b.bucket, COUNT(*) FROM blocks b JOIN buckets bk ON bk.name = b.bucket LEFT JOIN n ON n.block_id = b.id
+		WHERE b.refs > 0 AND COALESCE(n.n, 0) < bk.replication GROUP BY b.bucket`, time.Now().Add(-s.cfg.PeerGrace).Unix())
 	if err != nil {
 		return nil, err
 	}
