@@ -138,6 +138,35 @@ check "abort-multipart-upload"                  api abort-multipart-upload --buc
 expect_fail "upload-part after abort"           "NoSuchUpload" \
   api upload-part --bucket test --key aborted.bin --upload-id "$UP2" --part-number 1 --body "$WORK/part2"
 
+echo "Access keys with limits"
+# newkey JSON: creates an access key with the given settings; prints id:secret
+newkey() {
+  curl -sf -b "$WORK/cookies" -H 'X-IBS: 1' -H 'Content-Type: application/json' -d "$1" "$IBS_WEB/api/keys" |
+    sed -n 's/.*"id":"\([^"]*\)".*"secret":"\([^"]*\)".*/\1:\2/p'
+}
+# as KEY COMMAND...: runs the command with that access key
+as() { local k=$1; shift; AWS_ACCESS_KEY_ID=${k%%:*} AWS_SECRET_ACCESS_KEY=${k#*:} "$@"; }
+export -f as
+s3 cp "$WORK/hello.txt" s3://test/keys.txt >/dev/null
+RO=$(newkey '{"name":"read test","access":"read","buckets":["test"]}')
+OB=$(newkey '{"name":"write other","access":"full","buckets":["other"]}')
+check "keys with limits are created"            bash -c "[ -n '$RO' ] && [ -n '$OB' ]"
+check "a key lists only its buckets"            bash -c "out=\$(as '$RO' $S3 s3 ls) && grep -q ' test\$' <<<\"\$out\" && ! grep -q ' other\$' <<<\"\$out\""
+check "a read-only key downloads"               bash -c "as '$RO' $S3 s3 cp s3://test/keys.txt - | cmp -s - '$WORK/hello.txt'"
+expect_fail "a read-only key can't upload"      "AccessDenied" as "$RO" $S3 s3 cp "$WORK/hello.txt" s3://test/ro.txt
+expect_fail "a read-only key can't delete"      "AccessDenied" as "$RO" $S3 s3api delete-object --bucket test --key keys.txt
+expect_fail "a key can't read other buckets"    "AccessDenied" as "$RO" $S3 s3 ls s3://other/
+check "a key for one bucket writes there"       as "$OB" $S3 s3 cp "$WORK/hello.txt" s3://other/ob.txt
+expect_fail "but not in another bucket"         "AccessDenied" as "$OB" $S3 s3 cp "$WORK/hello.txt" s3://test/ob.txt
+expect_fail "nor copy from a bucket it can't read" "403" as "$OB" $S3 s3 cp s3://test/keys.txt s3://other/copied.txt
+expect_fail "nor copy-object from it"           "AccessDenied" as "$OB" $S3 s3api copy-object --bucket other --key copied.txt --copy-source test/keys.txt
+expect_fail "nor create buckets"                "AccessDenied" as "$OB" $S3 s3 mb s3://made-by-limited-key
+OBID=${OB%%:*}
+check "a key's limits can be changed"           curl -sf -b "$WORK/cookies" -X PUT -H 'X-IBS: 1' -H 'Content-Type: application/json' \
+  -d '{"name":"now read only","access":"read","buckets":["other"]}' "$IBS_WEB/api/keys/$OBID"
+expect_fail "and apply at once, same secret"    "AccessDenied" as "$OB" $S3 s3 cp "$WORK/hello.txt" s3://other/ob2.txt
+check "the full key still sees everything"      bash -c "out=\$($S3 s3 ls) && grep -q ' test\$' <<<\"\$out\" && grep -q ' other\$' <<<\"\$out\""
+
 echo "Deleting"
 check "rm deletes one object"                   bash -c "$S3 s3 rm s3://test/moved.txt && ! $S3 s3api head-object --bucket test --key moved.txt >/dev/null 2>&1"
 check "delete-objects deletes several"          api delete-objects --bucket test --delete '{"Objects":[{"Key":"meta.txt"},{"Key":"md5.txt"}]}'

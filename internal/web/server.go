@@ -400,18 +400,33 @@ func (s *Server) routes() {
 		}
 		return writeJSON(w, nonNil(k))
 	}))
+	// A key's settings: access "full" or "read"; buckets null (all) or a list.
+	type keyRequest struct {
+		Name    string   `json:"name"`
+		Access  string   `json:"access"`
+		Buckets []string `json:"buckets"`
+	}
 	m.HandleFunc("POST /api/keys", a(func(w http.ResponseWriter, r *http.Request, st *site.Site) error {
-		var req struct {
-			Name string `json:"name"`
-		}
+		req := keyRequest{Access: site.AccessFull}
 		if err := readJSON(r, &req); err != nil {
 			return err
 		}
-		k, err := st.CreateAccessKey(req.Name)
+		k, err := st.CreateAccessKey(req.Name, req.Access, req.Buckets)
 		if err != nil {
-			return err
+			return badRequest(err.Error())
 		}
 		return writeJSON(w, k)
+	}))
+	m.HandleFunc("PUT /api/keys/{id}", a(func(w http.ResponseWriter, r *http.Request, st *site.Site) error {
+		var req keyRequest
+		if err := readJSON(r, &req); err != nil {
+			return err
+		}
+		if err := st.UpdateAccessKey(r.PathValue("id"), req.Name, req.Access, req.Buckets); err != nil {
+			return badRequest(err.Error())
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return nil
 	}))
 	m.HandleFunc("DELETE /api/keys/{id}", a(func(w http.ResponseWriter, r *http.Request, st *site.Site) error {
 		return st.DeleteAccessKey(r.PathValue("id"))

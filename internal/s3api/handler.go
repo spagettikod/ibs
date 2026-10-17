@@ -42,7 +42,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	bucket, key := h.parsePath(r)
-	if err := h.route(sw, r, body, bucket, key); err != nil {
+	pol, ok := h.Site.AccessKeyPolicy(accessKeyOf(r))
+	if !ok {
+		writeError(sw, r, errAccessDenied("The access key does not exist."))
+		return
+	}
+	if aerr := authorize(r, pol, bucket, key); aerr != nil {
+		writeError(sw, r, aerr)
+		return
+	}
+	if err := h.route(sw, r, body, bucket, key, pol); err != nil {
 		e := toS3Error(err)
 		if e.Status >= 500 {
 			slog.Error("s3 request failed", "method", r.Method, "uri", r.RequestURI, "err", err)
@@ -85,11 +94,38 @@ func (h *Handler) parsePath(r *http.Request) (bucket, key string) {
 	return bucket, key
 }
 
-func (h *Handler) route(w http.ResponseWriter, r *http.Request, body io.Reader, bucket, key string) error {
+// authorize checks a request against what its access key may do: reading
+// (GET, HEAD) needs the bucket, anything else full access to it; a copy also
+// reading its source.
+func authorize(r *http.Request, pol site.KeyPolicy, bucket, key string) *Error {
+	denied := func(b string) *Error {
+		return errAccessDenied(fmt.Sprintf("This access key may not do that in bucket %q.", b))
+	}
+	if r.Method == http.MethodGet || r.Method == http.MethodHead {
+		if !pol.CanRead(bucket) {
+			return denied(bucket)
+		}
+		return nil
+	}
+	if bucket == "" || !pol.CanWrite(bucket) {
+		if pol.Access != site.AccessFull {
+			return errAccessDenied("This access key is read only.")
+		}
+		return denied(bucket)
+	}
+	if r.Header.Get("x-amz-copy-source") != "" {
+		if src, _, err := copySource(r); err == nil && !pol.CanRead(src) {
+			return denied(src)
+		}
+	}
+	return nil
+}
+
+func (h *Handler) route(w http.ResponseWriter, r *http.Request, body io.Reader, bucket, key string, pol site.KeyPolicy) error {
 	q := r.URL.Query()
 	if bucket == "" {
 		if r.Method == http.MethodGet {
-			return h.listBuckets(w)
+			return h.listBuckets(w, pol)
 		}
 		return errNotImplemented("unsupported service operation")
 	}
@@ -222,7 +258,8 @@ type owner struct {
 
 func (h *Handler) owner() owner { return owner{ID: h.Site.ID.SiteID, DisplayName: h.Site.Name()} }
 
-func (h *Handler) listBuckets(w http.ResponseWriter) error {
+// listBuckets lists the buckets the key may use.
+func (h *Handler) listBuckets(w http.ResponseWriter, pol site.KeyPolicy) error {
 	buckets, err := h.Site.ListBuckets()
 	if err != nil {
 		return err
@@ -237,7 +274,9 @@ func (h *Handler) listBuckets(w http.ResponseWriter) error {
 		Buckets []bucket `xml:"Buckets>Bucket"`
 	}{Owner: h.owner()}
 	for _, b := range buckets {
-		res.Buckets = append(res.Buckets, bucket{b.Name, b.Created.Format(timeFormat)})
+		if pol.Buckets == nil || pol.Buckets[b.Name] {
+			res.Buckets = append(res.Buckets, bucket{b.Name, b.Created.Format(timeFormat)})
+		}
 	}
 	writeXML(w, res)
 	return nil

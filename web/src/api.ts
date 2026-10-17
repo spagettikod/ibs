@@ -102,7 +102,11 @@ export type Bucket = { name: string; created: string; replication: number; objec
 
 export type ObjectInfo = { bucket: string; key: string; size: number; etag: string; content_type: string; modified: string }
 
-export type AccessKey = { id: string; name: string; created: string; secret?: string }
+export type AccessKey = {
+  id: string; name: string; created: string; secret?: string
+  access: 'full' | 'read'
+  buckets: string[] | null // null: all buckets
+}
 
 export type Settings = { site_name: string; peer_advertise: string }
 

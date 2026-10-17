@@ -5,6 +5,11 @@ the launcher and the relay are released separately.
 
 ## Unreleased
 
+- **Access keys with limits:** a key can be read only (list and download), and limited
+  to some buckets; it only sees those. Change a key's limits under **Access keys →
+  Edit**; its secret stays. Deleting a bucket takes it off the keys that list it.
+- Clicking **The IBS** on the dashboard opens The Known Universe; dashboard tiles no
+  longer underline their text when pointed at.
 - **A scrub catches up** on copies it couldn't check because their site was down: at
   the end it checks them if the site is back, and the "couldn't be reached" note goes.
 - **A scrub that couldn't check everything says so** ("Not complete"), on the Scrub page

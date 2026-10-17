@@ -47,6 +47,19 @@ func (p *sigParams) scope() string {
 	return p.date + "/" + p.region + "/" + p.service + "/aws4_request"
 }
 
+// accessKeyOf returns the access key of a request authenticate accepted.
+func accessKeyOf(r *http.Request) string {
+	if strings.HasPrefix(r.Header.Get("Authorization"), algorithm+" ") {
+		if p, err := parseAuthHeader(r); err == nil {
+			return p.accessKey
+		}
+		return ""
+	}
+	cred := r.URL.Query().Get("X-Amz-Credential")
+	id, _, _ := strings.Cut(cred, "/")
+	return id
+}
+
 // authenticate verifies a SigV4 request (header or presigned URL) and
 // returns the request body to use, which verifies the payload as it is read.
 func authenticate(r *http.Request, lookup SecretLookup, now time.Time) (io.Reader, *Error) {

@@ -137,6 +137,7 @@ func (s *Site) DeleteBucket(name string) error {
 		return err
 	}
 	s.bucketKeys.Delete(name)
+	s.forgetBucketInKeys(name)
 	s.markDirty()
 	return nil
 }

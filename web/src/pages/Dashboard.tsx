@@ -178,7 +178,7 @@ export default function DashboardPage() {
         <Stat label="Storage" value={`${fmtBytes(site.free)} free`}
           sub={<><Meter used={used} total={site.capacity} />{fmtBytes(used)} of {fmtBytes(site.capacity)} used
             {site.held_bytes > 0 ? `, ${fmtBytes(site.held_bytes)} of it other sites' copies` : ''}</>} />
-        <Stat label="The IBS" value={`${online} of ${network.length + 1}`} sub="sites online" />
+        <a className="tile-link" href="#/network"><Stat label="The IBS" value={`${online} of ${network.length + 1}`} sub="sites online" /></a>
         <ScrubTile info={scrub.data} />
       </div>
 

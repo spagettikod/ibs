@@ -301,6 +301,9 @@ var migrations = []string{
 	`ALTER TABLE blocks ADD COLUMN upload TEXT NOT NULL DEFAULT ''`,
 	// Copies a finished scrub couldn't check: their site was down to the end.
 	`ALTER TABLE scrubs ADD COLUMN unchecked INTEGER NOT NULL DEFAULT 0`,
+	// Access key permissions: full | read, and the buckets ('' = all; else a JSON list).
+	`ALTER TABLE access_keys ADD COLUMN access TEXT NOT NULL DEFAULT 'full'`,
+	`ALTER TABLE access_keys ADD COLUMN buckets TEXT NOT NULL DEFAULT ''`,
 }
 
 func Open(path string) (*sql.DB, error) {

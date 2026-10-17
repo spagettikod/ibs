@@ -2,9 +2,12 @@ package site
 
 import (
 	"crypto/rand"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -14,11 +17,37 @@ import (
 
 // ---- S3 access keys ----
 
+// Access an access key gives: full (read and write) or read only.
+const (
+	AccessFull = "full"
+	AccessRead = "read"
+)
+
 type AccessKey struct {
 	ID      string    `json:"id"`
 	Name    string    `json:"name"`
 	Created time.Time `json:"created"`
-	Secret  string    `json:"secret,omitempty"` // only returned on creation
+	Access  string    `json:"access"`
+	// Buckets the key may use; nil: all buckets, also ones created later.
+	Buckets []string `json:"buckets"`
+	Secret  string   `json:"secret,omitempty"` // only returned on creation
+}
+
+// KeyPolicy is what a key may do.
+type KeyPolicy struct {
+	Access  string
+	Buckets map[string]bool // nil: all buckets
+}
+
+// CanRead reports whether the key may read bucket ("" = the bucket list).
+func (p KeyPolicy) CanRead(bucket string) bool {
+	return p.Buckets == nil || bucket == "" || p.Buckets[bucket]
+}
+
+// CanWrite reports whether the key may change bucket: create, upload,
+// delete. Creating a bucket needs a key for all buckets, or one listing it.
+func (p KeyPolicy) CanWrite(bucket string) bool {
+	return p.Access == AccessFull && (p.Buckets == nil || p.Buckets[bucket])
 }
 
 func randomString(alphabet string, n int) string {
@@ -30,24 +59,79 @@ func randomString(alphabet string, n int) string {
 	return string(b)
 }
 
-func (s *Site) CreateAccessKey(name string) (*AccessKey, error) {
+// checkKey validates a key's access and buckets and returns how to store
+// the buckets.
+func (s *Site) checkKey(access string, buckets []string) (string, error) {
+	if access != AccessFull && access != AccessRead {
+		return "", errors.New("access must be full or read")
+	}
+	if buckets == nil {
+		return "", nil
+	}
+	if len(buckets) == 0 {
+		return "", errors.New("choose at least one bucket, or all buckets")
+	}
+	for _, b := range buckets {
+		if !s.BucketExists(b) {
+			return "", fmt.Errorf("no bucket %q", b)
+		}
+	}
+	slices.Sort(buckets)
+	j, _ := json.Marshal(slices.Compact(buckets))
+	return string(j), nil
+}
+
+func (s *Site) CreateAccessKey(name, access string, buckets []string) (*AccessKey, error) {
+	stored, err := s.checkKey(access, buckets)
+	if err != nil {
+		return nil, err
+	}
 	k := &AccessKey{
 		ID:      "IBS" + randomString("ABCDEFGHIJKLMNOPQRSTUVWXYZ234567", 17),
 		Name:    strings.TrimSpace(name),
 		Created: time.Now().UTC(),
+		Access:  access,
+		Buckets: buckets,
 		Secret:  randomString("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789", 40),
 	}
 	enc := keys.Seal(s.ID.Master, []byte(k.Secret), []byte("access-key:"+k.ID))
-	if _, err := s.DB.Exec(`INSERT INTO access_keys(id, secret_enc, name, created) VALUES(?, ?, ?, ?)`,
-		k.ID, enc, k.Name, k.Created.Unix()); err != nil {
+	if _, err := s.DB.Exec(`INSERT INTO access_keys(id, secret_enc, name, created, access, buckets) VALUES(?, ?, ?, ?, ?, ?)`,
+		k.ID, enc, k.Name, k.Created.Unix(), access, stored); err != nil {
 		return nil, err
 	}
 	s.markDirty()
 	return k, nil
 }
 
+// UpdateAccessKey changes a key's description, access and buckets; its
+// secret stays.
+func (s *Site) UpdateAccessKey(id, name, access string, buckets []string) error {
+	stored, err := s.checkKey(access, buckets)
+	if err != nil {
+		return err
+	}
+	res, err := s.DB.Exec(`UPDATE access_keys SET name = ?, access = ?, buckets = ? WHERE id = ?`, strings.TrimSpace(name), access, stored, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return errors.New("no such access key")
+	}
+	s.markDirty()
+	return nil
+}
+
+func decodeKeyBuckets(stored string) []string {
+	if stored == "" {
+		return nil
+	}
+	out := []string{}
+	json.Unmarshal([]byte(stored), &out)
+	return out
+}
+
 func (s *Site) AccessKeys() ([]AccessKey, error) {
-	rows, err := s.DB.Query(`SELECT id, name, created FROM access_keys ORDER BY created`)
+	rows, err := s.DB.Query(`SELECT id, name, created, access, buckets FROM access_keys ORDER BY created`)
 	if err != nil {
 		return nil, err
 	}
@@ -56,13 +140,55 @@ func (s *Site) AccessKeys() ([]AccessKey, error) {
 	for rows.Next() {
 		var k AccessKey
 		var c int64
-		if err := rows.Scan(&k.ID, &k.Name, &c); err != nil {
+		var buckets string
+		if err := rows.Scan(&k.ID, &k.Name, &c, &k.Access, &buckets); err != nil {
 			return nil, err
 		}
 		k.Created = time.Unix(c, 0).UTC()
+		k.Buckets = decodeKeyBuckets(buckets)
 		out = append(out, k)
 	}
 	return out, rows.Err()
+}
+
+// AccessKeyPolicy returns what a key may do.
+func (s *Site) AccessKeyPolicy(id string) (KeyPolicy, bool) {
+	var p KeyPolicy
+	var buckets string
+	if s.DB.QueryRow(`SELECT access, buckets FROM access_keys WHERE id = ?`, id).Scan(&p.Access, &buckets) != nil {
+		return p, false
+	}
+	if list := decodeKeyBuckets(buckets); list != nil {
+		p.Buckets = map[string]bool{}
+		for _, b := range list {
+			p.Buckets[b] = true
+		}
+	}
+	return p, true
+}
+
+// forgetBucketInKeys removes a deleted bucket from the keys that list it, so
+// a new bucket with the same name doesn't inherit their access.
+func (s *Site) forgetBucketInKeys(bucket string) {
+	rows, err := s.DB.Query(`SELECT id, buckets FROM access_keys WHERE buckets != ''`)
+	if err != nil {
+		return
+	}
+	type change struct{ id, buckets string }
+	var changes []change
+	for rows.Next() {
+		var id, stored string
+		rows.Scan(&id, &stored)
+		list := decodeKeyBuckets(stored)
+		if i := slices.Index(list, bucket); i >= 0 {
+			j, _ := json.Marshal(slices.Delete(list, i, i+1))
+			changes = append(changes, change{id, string(j)})
+		}
+	}
+	rows.Close()
+	for _, c := range changes {
+		s.DB.Exec(`UPDATE access_keys SET buckets = ? WHERE id = ?`, c.buckets, c.id)
+	}
 }
 
 func (s *Site) DeleteAccessKey(id string) error {

@@ -171,7 +171,9 @@ IBS runs in Docker. Choose your case; the ports each machine needs are under
 
 1. **Buckets → Create bucket:** give it a name. The form shows roughly how much more
    fits right now.
-2. **Access keys → Create:** copy the key ID and secret.
+2. **Access keys → Create:** choose what the key may do (full or read only) and which
+   buckets (all, or some), then copy the key ID and secret. Give each backup tool its
+   own key with only the bucket it needs; **Edit** changes that later.
 3. Use the key with any S3 client, for example the AWS CLI:
 
    ```bash
@@ -586,10 +588,13 @@ Tested with the AWS CLI and rclone; see `test/s3/`.
 | GetBucketLocation, GetBucketVersioning | `aws s3api get-bucket-location` | No region; always "not versioned" |
 | PutObject, GetObject, HeadObject | `aws s3 cp` | Ranges, `If-*` conditions, `x-amz-meta-*`, `Content-MD5` |
 | DeleteObject, DeleteObjects | `aws s3 rm [--recursive]` | |
-| CopyObject, UploadPartCopy | `aws s3 cp/mv s3://… s3://…` | Copies within a bucket use no extra space |
+| CopyObject, UploadPartCopy | `aws s3 cp/mv s3://… s3://…` | A copy is stored again, like on a disk |
 | ListObjects v1/v2 | `aws s3 ls` | Prefix, delimiter, paging |
 | Multipart uploads | large `aws s3 cp` | Create, UploadPart, Complete, Abort, ListParts, ListMultipartUploads |
 | GetObjectTagging | | Always empty |
+
+Access keys can be limited to reading (list and download) and to some buckets; a key
+only sees its buckets in `aws s3 ls`. Anything else gets `AccessDenied`.
 
 Not supported (returns an error): versioning, ACLs and bucket policies, CORS, lifecycle
 rules, setting tags, object lock, website hosting, and storage classes other than

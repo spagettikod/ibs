@@ -702,3 +702,41 @@ func TestCopyProgress(t *testing.T) {
 			h.CopiesMade, h.CopiesPossible, h.Copying, h.UnderReplicated)
 	}
 }
+
+// Keys can be limited to reading, and to some buckets; deleting a bucket
+// takes it off the keys that list it.
+func TestAccessKeyPolicy(t *testing.T) {
+	s := newTestSite(t)
+	s.CreateBucket("photos")
+	s.CreateBucket("music")
+	all, _ := s.CreateAccessKey("all", AccessFull, nil)
+	read, _ := s.CreateAccessKey("read", AccessRead, []string{"photos"})
+	if _, err := s.CreateAccessKey("bad", "admin", nil); err == nil {
+		t.Fatal("accepted an unknown access")
+	}
+	if _, err := s.CreateAccessKey("bad", AccessFull, []string{"nope"}); err == nil {
+		t.Fatal("accepted a bucket that doesn't exist")
+	}
+	if _, err := s.CreateAccessKey("bad", AccessFull, []string{}); err == nil {
+		t.Fatal("accepted a key for no buckets")
+	}
+	p, _ := s.AccessKeyPolicy(all.ID)
+	if !p.CanWrite("music") || !p.CanWrite("later") || !p.CanRead("") {
+		t.Fatalf("full key for all buckets: %+v", p)
+	}
+	p, _ = s.AccessKeyPolicy(read.ID)
+	if p.CanWrite("photos") || !p.CanRead("photos") || p.CanRead("music") {
+		t.Fatalf("read-only key for photos: %+v", p)
+	}
+	if err := s.UpdateAccessKey(read.ID, "now full", AccessFull, []string{"photos", "music"}); err != nil {
+		t.Fatal(err)
+	}
+	if p, _ = s.AccessKeyPolicy(read.ID); !p.CanWrite("music") {
+		t.Fatalf("after update: %+v", p)
+	}
+	s.DeleteBucket("music")
+	s.CreateBucket("music") // the same name again: no access through the old key
+	if p, _ = s.AccessKeyPolicy(read.ID); p.CanRead("music") || !p.CanWrite("photos") {
+		t.Fatalf("after deleting a bucket: %+v", p)
+	}
+}
