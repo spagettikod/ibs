@@ -135,6 +135,16 @@ export function Stat({ label, value, sub, tone }: { label: string; value: ReactN
   )
 }
 
+/** Shown in place of a figure that's still being counted. */
+export function Spinner({ title = 'Counting…' }: { title?: string }) {
+  return <span className="spinner" title={title} aria-label={title} />
+}
+
+/** A figure, or a spinner while it's being counted. */
+export function Counted({ ok, children }: { ok: boolean; children: ReactNode }) {
+  return ok ? <>{children}</> : <Spinner />
+}
+
 export function Status({ online, label }: { online: boolean; label?: string }) {
   return <span className={`pill ${online ? 'ok' : 'bad'}`}>{label ?? (online ? 'online' : 'offline')}</span>
 }

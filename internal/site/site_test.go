@@ -740,3 +740,26 @@ func TestAccessKeyPolicy(t *testing.T) {
 		t.Fatalf("after deleting a bucket: %+v", p)
 	}
 }
+
+// Pages read the expensive figures from the cache, and say when they aren't
+// counted yet instead of showing zeros.
+func TestStatsCache(t *testing.T) {
+	s := newTestSite(t)
+	ctx := context.Background()
+	s.CreateBucket("cached")
+	s.PutObject(ctx, "cached", "f", strings.NewReader("data"), "", nil)
+	s.statsRunning.Store(true) // as with statsLoop, before its first calculation
+	if d, _ := s.Dashboard(); d.Counted || d.Site.Objects != 0 {
+		t.Fatalf("figures before the first count: counted %v, %d objects", d.Counted, d.Site.Objects)
+	}
+	if b, _ := s.ListBuckets(); b[0].Counted {
+		t.Fatal("bucket counted before the first count")
+	}
+	s.refreshStats()
+	d, _ := s.Dashboard()
+	b, _ := s.ListBuckets()
+	n, _ := s.Nodes()
+	if !d.Counted || d.Site.Objects != 1 || d.Replication.Blocks != 1 || !b[0].Counted || b[0].Objects != 1 || n[0].Blocks != 1 {
+		t.Fatalf("figures from the cache: dashboard %+v %+v, bucket %+v, node %+v", d.Site, d.Replication, b[0], n[0])
+	}
+}

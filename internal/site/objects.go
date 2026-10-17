@@ -56,6 +56,7 @@ type BucketInfo struct {
 	Name        string    `json:"name"`
 	Created     time.Time `json:"created"`
 	Replication int       `json:"replication"`
+	Counted     bool      `json:"counted"` // the counts below are in (stats.go)
 	Objects     int64     `json:"objects"`
 	Size        int64     `json:"size"`
 	Pending     int64     `json:"pending"` // blocks still missing replicas
@@ -143,47 +144,27 @@ func (s *Site) DeleteBucket(name string) error {
 }
 
 func (s *Site) ListBuckets() ([]BucketInfo, error) {
-	rows, err := s.DB.Query(`SELECT b.name, b.created, b.replication,
-			(SELECT COUNT(*) FROM objects o WHERE o.bucket = b.name),
-			(SELECT COALESCE(SUM(size), 0) FROM objects o WHERE o.bucket = b.name)
-		FROM buckets b ORDER BY b.name`)
+	rows, err := s.DB.Query(`SELECT name, created, replication FROM buckets ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
+	st := s.stats() // the counts, from the cache
 	var out []BucketInfo
 	for rows.Next() {
 		var b BucketInfo
 		var created int64
-		if err := rows.Scan(&b.Name, &created, &b.Replication, &b.Objects, &b.Size); err != nil {
+		if err := rows.Scan(&b.Name, &created, &b.Replication); err != nil {
 			return nil, err
 		}
 		b.Created = time.Unix(created, 0).UTC()
+		if st != nil {
+			c := st.Buckets[b.Name]
+			b.Counted, b.Objects, b.Size, b.Pending = true, c.Objects, c.Size, c.Pending
+		}
 		out = append(out, b)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	pending := map[string]int64{}
-	pr, err := s.DB.Query(`WITH n AS (
-			SELECT r.block_id, COUNT(*) AS n FROM replicas r JOIN peers p ON p.site_id = r.site_id
-			WHERE r.state = 'ok' AND p.last_seen >= ? GROUP BY r.block_id)
-		SELECT b.bucket, COUNT(*) FROM blocks b JOIN buckets bk ON bk.name = b.bucket LEFT JOIN n ON n.block_id = b.id
-		WHERE b.refs > 0 AND COALESCE(n.n, 0) < bk.replication GROUP BY b.bucket`, time.Now().Add(-s.cfg.PeerGrace).Unix())
-	if err != nil {
-		return nil, err
-	}
-	defer pr.Close()
-	for pr.Next() {
-		var name string
-		var n int64
-		pr.Scan(&name, &n)
-		pending[name] = n
-	}
-	for i := range out {
-		out[i].Pending = pending[out[i].Name]
-	}
-	return out, pr.Err()
+	return out, rows.Err()
 }
 
 func (s *Site) BucketExists(name string) bool {

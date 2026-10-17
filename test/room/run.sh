@@ -78,7 +78,7 @@ for i in 13 14 15; do codes="$codes $(upload $ID-b b$i.bin)"; done
 check "site-b's upload works now"               bash -c "[ '$codes' = ' 200 200 200' ]"
 check "site-b gave back site-a's copies"        bash -c "docker logs $ID-b 2>&1 | grep -q \"gave back other sites' copies\""
 check "site-a released them"                    bash -c "docker logs $ID-a 2>&1 | grep -q 'released copies to a site that needs room'"
-check "site-b holds fewer of them"              bash -c '[ "$(held $ID-b)" -lt 5 ]'
+check "site-b holds fewer of them"              wait_for 30 bash -c '[ "$(held $ID-b)" -lt 5 ]'
 check "site-a's files read back intact"         bash -c "$(declare -f intact); export WORK; for i in 1 2 3 4 5; do intact $ID-a a\$i.bin || exit 1; done"
 check "site-a's dashboard: running out of space" wait_for 30 bash -c "dash | grep -q '\"no_room\":[1-9]'"
 check "site-b takes no new copies meanwhile"    bash -c "api $ID-b GET /api/dashboard | grep -q '\"offered\":0,'"

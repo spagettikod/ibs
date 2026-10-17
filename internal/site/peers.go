@@ -546,6 +546,7 @@ type PeerInfo struct {
 	Free        int64    `json:"free"`
 	LastError   string   `json:"last_error"`
 	Reconciled  int64    `json:"reconciled"`
+	Counted     bool     `json:"counted"`      // the counts below are in (stats.go)
 	ReplicasOut int64    `json:"replicas_out"` // our blocks stored there
 	Removing    int64    `json:"removing"`     // our deleted blocks it hasn't removed yet
 	BytesOut    int64    `json:"bytes_out"`
@@ -560,14 +561,9 @@ type PeerInfo struct {
 }
 
 func (s *Site) Peers() ([]PeerInfo, error) {
+	st := s.stats() // the counts, from the cache
 	rows, err := s.DB.Query(`SELECT p.site_id, p.name, p.address, p.added, p.online, p.last_seen, p.up_since,
-			p.capacity, p.free, p.last_error, p.reconciled,
-			(SELECT COUNT(*) FROM replicas r WHERE r.site_id = p.site_id AND r.state = 'ok'),
-			(SELECT COALESCE(SUM(b.size), 0) FROM replicas r JOIN blocks b ON b.id = r.block_id WHERE r.site_id = p.site_id AND r.state = 'ok'),
-			(SELECT COUNT(*) FROM replicas r WHERE r.site_id = p.site_id AND r.state = 'delete'),
-			(SELECT COUNT(*) FROM held_blocks h WHERE h.owner = p.site_id),
-			(SELECT COALESCE(SUM(size), 0) FROM held_blocks h WHERE h.owner = p.site_id),
-			p.routes, p.version
+			p.capacity, p.free, p.last_error, p.reconciled, p.routes, p.version
 		FROM peers p ORDER BY p.name`)
 	if err != nil {
 		return nil, err
@@ -578,7 +574,7 @@ func (s *Site) Peers() ([]PeerInfo, error) {
 		var p PeerInfo
 		var routesJSON string
 		if err := rows.Scan(&p.SiteID, &p.Name, &p.Address, &p.Added, &p.Online, &p.LastSeen, &p.UpSince,
-			&p.Capacity, &p.Free, &p.LastError, &p.Reconciled, &p.ReplicasOut, &p.BytesOut, &p.Removing, &p.HeldBlocks, &p.HeldBytes, &routesJSON, &p.Version); err != nil {
+			&p.Capacity, &p.Free, &p.LastError, &p.Reconciled, &routesJSON, &p.Version); err != nil {
 			return nil, err
 		}
 		p.Path = s.pathInfo(p.SiteID)
@@ -586,6 +582,10 @@ func (s *Site) Peers() ([]PeerInfo, error) {
 		json.Unmarshal([]byte(routesJSON), &rt)
 		p.Relays = len(rt.Relays)
 		p.OutBps, p.InBps = s.copyRates(p.SiteID)
+		if st != nil {
+			c := st.Peers[p.SiteID]
+			p.Counted, p.ReplicasOut, p.BytesOut, p.Removing, p.HeldBlocks, p.HeldBytes = true, c.ReplicasOut, c.BytesOut, c.Removing, c.HeldBlocks, c.HeldBytes
+		}
 		out = append(out, p)
 	}
 	return out, rows.Err()

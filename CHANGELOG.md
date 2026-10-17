@@ -3,6 +3,16 @@
 Each release says what to update and which launcher and relay it works with: IBS,
 the launcher and the relay are released separately.
 
+## Unreleased
+
+- **Pages load at once, however many files a site has.** Figures that take a pass over
+  every block (copies, per site, node and bucket) are kept by one background routine
+  and read from its cache; they may be a few seconds behind. Right after a start they
+  show a spinner until counted. With 270,000 blocks the dashboard took 3 s (20 s and
+  more on a busy disk); now under 1 ms.
+- **Less background work:** the replication and trim scans run when something changed,
+  and otherwise every 2 minutes, instead of every 5 seconds.
+
 ## 1.7.2
 
 **What to update:** sites, under **Settings → Updates**; nodes follow.

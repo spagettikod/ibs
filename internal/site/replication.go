@@ -18,6 +18,7 @@ import (
 )
 
 const (
+	scanEvery        = 2 * time.Minute  // full replication and trim scans when nothing changed
 	staleUpload      = 10 * time.Minute // unfinished multipart uploads with nothing arriving for this long are removed
 	replicateBatch   = 256              // blocks looked up at a time
 	replicateWorkers = 4                // blocks copied at the same time
@@ -690,30 +691,69 @@ type ReplicationHealth struct {
 }
 
 func (s *Site) ReplicationHealth() ReplicationHealth {
+	h, _ := s.blockFigures()
+	return h
+}
+
+// blockGroup is the figures of the blocks in use of one bucket on one node.
+type blockGroup struct {
+	bucket, node         string
+	blocks, bytes, under int64
+	stranded             int64 // with no copy on another site
+}
+
+// blockFigures takes one pass over the blocks in use, with their copies
+// counted once each: on sites seen within the grace period (counted), online,
+// and any. It returns the replication health, and the figures per bucket and
+// node for the cache (stats.go).
+func (s *Site) blockFigures() (ReplicationHealth, []blockGroup) {
 	h := ReplicationHealth{NoRoom: s.noRoom.Load()}
 	countedSince := time.Now().Add(-s.cfg.PeerGrace).Unix()
 	var sites int64
 	s.DB.QueryRow(`SELECT COUNT(*) FROM peers WHERE last_seen >= ?`, countedSince).Scan(&sites)
 	s.DB.QueryRow(`SELECT COUNT(*) FROM replicas WHERE state = 'delete'`).Scan(&h.PendingDeletes)
-	// Everything in one pass over the blocks, with the copies of each counted
-	// once: on sites seen within the grace period (counted), online, and any.
-	s.DB.QueryRow(`WITH n AS (
+	rows, err := s.DB.Query(`WITH n AS (
 			SELECT r.block_id, SUM(p.last_seen >= ?) AS counted, SUM(p.online = 1) AS online, COUNT(*) AS any
 			FROM replicas r JOIN peers p ON p.site_id = r.site_id WHERE r.state = 'ok' GROUP BY r.block_id),
 		x AS (
-			SELECT b.size, b.node_id, bk.replication AS repl, min(bk.replication, ?) AS want,
+			SELECT b.bucket, b.node_id, b.size, bk.replication AS repl, min(bk.replication, ?) AS want,
 				COALESCE(n.counted, 0) AS c, COALESCE(n.online, 0) AS o, COALESCE(n.any, 0) AS a
 			FROM blocks b JOIN buckets bk ON bk.name = b.bucket LEFT JOIN n ON n.block_id = b.id WHERE b.refs > 0)
-		SELECT COUNT(*), COALESCE(SUM(size), 0), COUNT(CASE WHEN node_id = '' THEN 1 END),
+		SELECT bucket, node_id, COUNT(*), COALESCE(SUM(size), 0), COUNT(CASE WHEN node_id = '' THEN 1 END),
 			COUNT(CASE WHEN c < repl THEN 1 END), COALESCE(SUM(CASE WHEN c < repl THEN (repl - c) * size END), 0),
 			COUNT(CASE WHEN o > repl THEN 1 END),
 			COALESCE(SUM(min(c, want)), 0), COALESCE(SUM(want), 0), COUNT(CASE WHEN c < want THEN 1 END),
 			COALESCE(SUM(CASE WHEN c < want THEN (want - c) * size END), 0),
-			COALESCE(SUM(CASE WHEN a = 0 THEN size END), 0), COALESCE(SUM(CASE WHEN a > 0 AND a < ? THEN size END), 0)
-		FROM x`, countedSince, sites, Copies).
-		Scan(&h.Blocks, &h.Bytes, &h.MissingLocally, &h.UnderReplicated, &h.PendingBytes, &h.OverReplicated,
-			&h.CopiesMade, &h.CopiesPossible, &h.Copying, &h.CopyingBytes, &h.noCopy, &h.someCopies)
-	return h
+			COALESCE(SUM(CASE WHEN a = 0 THEN size END), 0), COALESCE(SUM(CASE WHEN a > 0 AND a < ? THEN size END), 0),
+			COUNT(CASE WHEN a = 0 THEN 1 END)
+		FROM x GROUP BY bucket, node_id`, countedSince, sites, Copies)
+	if err != nil {
+		return h, nil
+	}
+	defer rows.Close()
+	var groups []blockGroup
+	for rows.Next() {
+		var g blockGroup
+		var missing, pendingBytes, over, made, possible, copying, copyingBytes, noCopy, someCopies int64
+		if rows.Scan(&g.bucket, &g.node, &g.blocks, &g.bytes, &missing, &g.under, &pendingBytes, &over,
+			&made, &possible, &copying, &copyingBytes, &noCopy, &someCopies, &g.stranded) != nil {
+			continue
+		}
+		groups = append(groups, g)
+		h.Blocks += g.blocks
+		h.Bytes += g.bytes
+		h.MissingLocally += missing
+		h.UnderReplicated += g.under
+		h.PendingBytes += pendingBytes
+		h.OverReplicated += over
+		h.CopiesMade += made
+		h.CopiesPossible += possible
+		h.Copying += copying
+		h.CopyingBytes += copyingBytes
+		h.noCopy += noCopy
+		h.someCopies += someCopies
+	}
+	return h, groups
 }
 
 // drainOnce moves blocks off online nodes that share nothing

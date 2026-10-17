@@ -51,10 +51,17 @@ type Site struct {
 	bucketKeys sync.Map // bucket name -> []byte
 	accessKeys sync.Map // access key id -> secret
 
-	dirty     atomic.Bool
-	dirtyAt   atomic.Int64 // when metadata last changed (unix ns)
-	backupAt  atomic.Int64 // when a metadata backup generation was last cut (unix ns)
-	reconcile chan string
+	dirty atomic.Bool
+	// statsCache holds the expensive figures (stats.go); statsStale says
+	// something changed since. replDirty: something changed that the
+	// replication and trim scans should look at.
+	statsCache   atomic.Pointer[Stats]
+	statsStale   atomic.Bool
+	statsRunning atomic.Bool // statsLoop keeps the cache
+	replDirty    atomic.Bool
+	dirtyAt      atomic.Int64 // when metadata last changed (unix ns)
+	backupAt     atomic.Int64 // when a metadata backup generation was last cut (unix ns)
+	reconcile    chan string
 
 	events    *hub
 	lastState string // fingerprint used by watchState
@@ -295,15 +302,25 @@ func (s *Site) Run(ctx context.Context) {
 				more = s.replicateOnce(ctx)
 			}()
 			if !more {
-				select {
-				case <-ctx.Done():
-				case <-time.After(iv):
+				// Nothing to copy: scan again when something changed, and at
+				// least every scanEvery as a safety net (a site that stayed
+				// away past its grace period changes nothing by itself).
+				deadline := time.Now().Add(scanEvery)
+				for ctx.Err() == nil && time.Now().Before(deadline) && !s.replDirty.Swap(false) {
+					select {
+					case <-ctx.Done():
+					case <-time.After(iv):
+					}
 				}
 			}
 		}
 	}()
 	every(2*time.Second, "transfer-events", s.transferEvents)
-	every(iv, "trim", s.trimOnce)
+	go s.statsLoop(ctx)
+	// Trimming surplus copies scans every block: only after changes (the
+	// replication loop clears replDirty; trimming catches up on its next
+	// pass), and every scanEvery.
+	every(scanEvery, "trim", s.trimOnce)
 	every(iv, "gc", s.collectGarbage)
 	every(iv, "heal", s.healOnce)
 	every(iv, "drain", s.drainOnce)

@@ -88,7 +88,13 @@ func (s *Site) Subscribe(ctx context.Context) <-chan []string {
 	return ch
 }
 
-func (s *Site) notify(topics ...string) { s.events.notify(topics...) }
+// notify tells the web interface that something changed, and the background
+// work that depends on what's stored: cached figures and replication scans.
+func (s *Site) notify(topics ...string) {
+	s.statsStale.Store(true)
+	s.replDirty.Store(true)
+	s.events.notify(topics...)
+}
 
 // watchState raises events for changes that happen by the passage of time
 // rather than by an action, such as a storage node missing its heartbeats.

@@ -2,7 +2,7 @@ import { FormEvent, useState } from 'react'
 import { api, NodeInfo } from '../api'
 
 type JoinToken = { token: string; address: string; configured_address: string }
-import { ago, Card, Copy, ErrorBox, fmtBytes, Meter, Modal, Status, useLoader, useTick, Version } from '../ui'
+import { ago, Card, Copy, Counted, ErrorBox, fmtBytes, Meter, Modal, Status, useLoader, useTick, Version } from '../ui'
 
 export default function NodesPage() {
   const { data, error, reload } = useLoader(() => api<NodeInfo[]>('GET', '/api/nodes'), ['nodes', 'replication', 'data'])
@@ -113,11 +113,11 @@ export default function NodesPage() {
                 </td>
                 <Version v={n.version} />
                 <td className="mono small">{n.address || '—'}</td>
-                <td>{n.blocks.toLocaleString()}
-                  {n.held_blocks > 0 && <div className="muted small">+ {n.held_blocks.toLocaleString()} copies kept for other sites</div>}</td>
+                <td><Counted ok={n.counted}>{n.blocks.toLocaleString()}
+                  {n.held_blocks > 0 && <div className="muted small">+ {n.held_blocks.toLocaleString()} copies kept for other sites</div>}</Counted></td>
                 <td className="meter-cell">
-                  <Meter used={n.used} total={n.used + n.free} />
-                  <span className="muted small">{fmtBytes(n.used)} used · {fmtBytes(n.free)} free</span>
+                  <Counted ok={n.counted}><Meter used={n.used} total={n.used + n.free} />
+                  <span className="muted small">{fmtBytes(n.used)} used · {fmtBytes(n.free)} free</span></Counted>
                   {n.quota > 0 && n.used >= n.quota && <div className="small warn-text">Over the limit, no new blocks</div>}
                 </td>
                 <td>

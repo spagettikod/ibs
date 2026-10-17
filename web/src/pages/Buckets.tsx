@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useRef, useState } from 'react'
 import { api, Bucket, ObjectInfo, StorableCapacity } from '../api'
-import { Card, Empty, ErrorBox, fmtBytes, fmtDate, useLoader } from '../ui'
+import { Card, Counted, Empty, ErrorBox, fmtBytes, fmtDate, useLoader } from '../ui'
 
 function route(): { bucket?: string; prefix: string } {
   const parts = window.location.hash.replace(/^#\/?/, '').split('/')
@@ -76,9 +76,9 @@ function BucketList() {
               {data?.map((b) => (
                 <tr key={b.name}>
                   <td><a href="#" onClick={(e) => { e.preventDefault(); go(b.name) }}>{b.name}</a></td>
-                  <td>{b.objects}</td>
-                  <td>{fmtBytes(b.size)}</td>
-                  <td><ReplicationStatus b={b} sites={sites} /></td>
+                  <td><Counted ok={b.counted}>{b.objects.toLocaleString()}</Counted></td>
+                  <td><Counted ok={b.counted}>{fmtBytes(b.size)}</Counted></td>
+                  <td><Counted ok={b.counted}><ReplicationStatus b={b} sites={sites} /></Counted></td>
                   <td>{fmtDate(b.created)}</td>
                   <td className="right"><button className="btn small danger" onClick={() => remove(b)}>Delete</button></td>
                 </tr>

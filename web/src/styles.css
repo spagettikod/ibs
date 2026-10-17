@@ -252,6 +252,10 @@ input:focus, textarea:focus, select:focus { outline: 2px solid color-mix(in srgb
 .netgraph-legend .sw.uplink { border-top: 1.5px solid var(--border); }
 .netgraph-legend .sw.flow { width: 8px; height: 8px; border: none; border-radius: 50%; background: var(--accent); }
 .accent-text { color: var(--accent); }
+.spinner { display: inline-block; width: 0.9em; height: 0.9em; border: 2px solid var(--border); border-top-color: var(--accent);
+  border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: -0.1em; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 3s; } }
 .copying { display: grid; gap: 8px; }
 .copying-head { display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: baseline; }
 .copying-head b { font-size: 18px; font-variant-numeric: tabular-nums; }

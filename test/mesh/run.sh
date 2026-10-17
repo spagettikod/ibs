@@ -90,7 +90,7 @@ echo "Leaving"
 check "site-c leaves the IBS"                   bash -c "$(declare -f api dc); api site-c POST /api/ibs/leave; [ \$? -eq 0 ]"
 check "site-a and site-b forget site-c"         wait_for 20 bash -c "$(declare -f api dc not_peer_of); not_peer_of site-a site-c && not_peer_of site-b site-c"
 check "site-c has no sites left"                bash -c "$(declare -f api dc); [ \"\$(api site-c GET /api/peers)\" = '[]' ]"
-check "site-c deleted site-b's copies"          bash -c "$(declare -f api dc); api site-c GET /api/dashboard | grep -q '\"held_bytes\":0'"
+check "site-c deleted site-b's copies"          wait_for 30 bash -c "$(declare -f api dc); api site-c GET /api/dashboard | grep -q '\"held_bytes\":0'"
 check "site-c doesn't come back on its own"     bash -c "sleep 12; $(declare -f api dc not_peer_of); not_peer_of site-a site-c && not_peer_of site-b site-c"
 
 echo "Rejoining with a short code"

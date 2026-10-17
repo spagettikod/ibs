@@ -1,7 +1,7 @@
 import { api, Dashboard, ScrubInfo, TLSStatus, UpdatesInfo } from '../api'
 import { NetworkView, useNetworkView, ViewSwitch } from '../GeoMap'
 import { ratesOf } from '../NetworkGraph'
-import { ago, Card, ErrorBox, fmtBytes, fmtDuration, fmtSpeed, Meter, Stat, uptime, useLoader, useTick } from '../ui'
+import { ago, Card, ErrorBox, fmtBytes, fmtDuration, fmtSpeed, Meter, Spinner, Stat, uptime, useLoader, useTick } from '../ui'
 import { scrubPercent, scrubResult } from './Scrub'
 
 type Item = { level: 'bad' | 'warn' | 'info'; text: string; href: string; link: string }
@@ -9,6 +9,9 @@ type Item = { level: 'bad' | 'warn' | 'info'; text: string; href: string; link: 
 /** What needs attention, most serious first. */
 function attention(d: Dashboard, tls?: TLSStatus, updates?: UpdatesInfo, scrub?: ScrubInfo): Item[] {
   const out: Item[] = []
+  // Until the figures are counted (right after a start), leave out what
+  // depends on them rather than warn about zeros.
+  const counted = d.counted
   if (scrub && scrub.unresolved > 0) {
     out.push({ level: 'bad', text: `Some files can't be read: the scrub found ${scrub.unresolved} damaged ${scrub.unresolved === 1 ? 'block' : 'blocks'} with no intact copy left`, href: '#/scrub', link: 'Scrub' })
   }
@@ -33,13 +36,13 @@ function attention(d: Dashboard, tls?: TLSStatus, updates?: UpdatesInfo, scrub?:
     if (n.lost) out.push({ level: 'bad', text: `Files on storage node ${n.name} are being restored on your other nodes: the node has been gone too long`, href: '#/nodes', link: 'Nodes' })
     else if (!n.online) out.push({ level: 'warn', text: `Files on storage node ${n.name} are read from other sites for now: the node is offline (seen ${ago(n.last_seen)})`, href: '#/nodes', link: 'Nodes' })
   }
-  if (r.missing_locally > 0) {
+  if (counted && r.missing_locally > 0) {
     out.push({ level: 'warn', text: `${r.missing_locally.toLocaleString()} blocks are read from other sites for now: they're missing here and being restored`, href: '#/nodes', link: 'Nodes' })
   }
   // Other sites' copies make way for this site's own files, so they count as
   // room; those of offline sites don't, they can't be pushed away.
   const room = d.site.free + d.site.held_bytes - d.site.held_offline
-  if (d.site.capacity > 0 && room < d.site.capacity * 0.05) {
+  if (counted && d.site.capacity > 0 && room < d.site.capacity * 0.05) {
     out.push({ level: 'bad', text: `Uploads will soon fail: only ${fmtBytes(room)} is left for this site's files`, href: '#/nodes', link: 'Nodes' })
   }
   for (const rl of d.relays ?? []) {
@@ -48,7 +51,9 @@ function attention(d: Dashboard, tls?: TLSStatus, updates?: UpdatesInfo, scrub?:
   for (const p of d.peers ?? []) {
     if (!p.online) out.push({ level: 'warn', text: `Your copies on ${p.name} can't be reached, and new copies wait for it: the site is offline (seen ${ago(p.last_seen)})`, href: '#/network', link: 'The Known Universe' })
   }
-  if (c.sites > 0 && c.sites < c.copies) {
+  if (!counted) {
+    // nothing yet
+  } else if (c.sites > 0 && c.sites < c.copies) {
     out.push({ level: 'warn', text: `Your files aren't fully protected: they have ${c.sites} of ${c.copies} copies on other sites, because only ${c.sites} other ${c.sites === 1 ? 'site is' : 'sites are'} online`, href: '#/network', link: 'The Known Universe' })
   } else if (r.no_room > 0 || (!c.fits && r.under_replicated > 0)) {
     out.push({ level: 'warn', text: `Your files aren't fully protected: ${r.under_replicated.toLocaleString()} blocks lack copies because the IBS is running out of space. They get them when there's room.`, href: '#/network', link: 'The Known Universe' })
@@ -169,23 +174,33 @@ export default function DashboardPage() {
       <ErrorBox error={error} />
 
       <Health items={attention(data, tls.data, updates.data, scrub.data)} />
-      <Copying d={data} />
+      {data.counted && <Copying d={data} />}
 
       <div className="tiles">
-        <Stat label="Your files" value={fmtBytes(site.object_bytes)}
-          sub={`${site.objects.toLocaleString()} ${site.objects === 1 ? 'object' : 'objects'} in ${site.buckets} ${site.buckets === 1 ? 'bucket' : 'buckets'}, ${r.blocks.toLocaleString()} ${r.blocks === 1 ? 'block' : 'blocks'}`} />
-        <Stat label="Copies on other sites" value={r.copying > 0 ? `${copied}%` : `${have} of ${want}`}
-          tone={r.under_replicated === 0 ? 'ok' : 'warn'}
-          sub={r.copying > 0 ? `copying, ${r.copying.toLocaleString()} blocks left`
-            : r.under_replicated > 0 && have < want ? `per file; the next needs ${want - have === 1 ? 'another site' : 'more sites'}`
-            : r.under_replicated > 0 ? `per file; ${r.under_replicated.toLocaleString()} blocks wait for room`
-            : 'per file, all in place'} />
-        <Stat label="Room for your files" value={fmtBytes(roomForMine)}
-          sub={<><Meter used={mine} total={site.capacity} />
-            {site.held_bytes > 0
-              ? <>{fmtBytes(site.free)} empty, {fmtBytes(giving)} other sites' copies that make way for yours
-                {site.held_offline > 0 && `; ${fmtBytes(site.held_offline)} held for offline sites`}</>
-              : <>{fmtBytes(mine)} of {fmtBytes(site.capacity)} used by your files</>}</>} />
+        {!data.counted ? (
+          <>
+            <Stat label="Your files" value={<Spinner />} sub="counting…" />
+            <Stat label="Copies on other sites" value={<Spinner />} sub="counting…" />
+            <Stat label="Room for your files" value={<Spinner />} sub="counting…" />
+          </>
+        ) : (
+          <>
+            <Stat label="Your files" value={fmtBytes(site.object_bytes)}
+              sub={`${site.objects.toLocaleString()} ${site.objects === 1 ? 'object' : 'objects'} in ${site.buckets} ${site.buckets === 1 ? 'bucket' : 'buckets'}, ${r.blocks.toLocaleString()} ${r.blocks === 1 ? 'block' : 'blocks'}`} />
+            <Stat label="Copies on other sites" value={r.copying > 0 ? `${copied}%` : `${have} of ${want}`}
+              tone={r.under_replicated === 0 ? 'ok' : 'warn'}
+              sub={r.copying > 0 ? `copying, ${r.copying.toLocaleString()} blocks left`
+                : r.under_replicated > 0 && have < want ? `per file; the next needs ${want - have === 1 ? 'another site' : 'more sites'}`
+                : r.under_replicated > 0 ? `per file; ${r.under_replicated.toLocaleString()} blocks wait for room`
+                : 'per file, all in place'} />
+            <Stat label="Room for your files" value={fmtBytes(roomForMine)}
+              sub={<><Meter used={mine} total={site.capacity} />
+                {site.held_bytes > 0
+                  ? <>{fmtBytes(site.free)} empty, {fmtBytes(giving)} other sites' copies that make way for yours
+                    {site.held_offline > 0 && `; ${fmtBytes(site.held_offline)} held for offline sites`}</>
+                  : <>{fmtBytes(mine)} of {fmtBytes(site.capacity)} used by your files</>}</>} />
+          </>
+        )}
         <a className="tile-link" href="#/network"><Stat label="The IBS" value={`${online} of ${network.length + 1}`} sub="sites online" /></a>
         <ScrubTile info={scrub.data} />
       </div>
