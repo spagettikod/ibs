@@ -3,7 +3,12 @@
 Each release says what to update and which launcher and relay it works with: IBS,
 the launcher and the relay are released separately.
 
-## Unreleased
+## 1.7.4
+
+**What to update:** sites, under **Settings → Updates**; nodes follow.
+
+**Works with:** launcher 1.0.0 or newer (1.1.0 recommended), relay 1.2.0 or newer (1.4.0
+for short invite codes).
 
 - **A spinner shows when files are arriving or being deleted,** on the dashboard's Your
   files and Room for your files and next to the busy bucket, while the figures catch
