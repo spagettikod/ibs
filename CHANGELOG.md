@@ -3,7 +3,12 @@
 Each release says what to update and which launcher and relay it works with: IBS,
 the launcher and the relay are released separately.
 
-## Unreleased
+## 1.7.5
+
+**What to update:** sites, under **Settings → Updates**; nodes follow.
+
+**Works with:** launcher 1.0.0 or newer (1.1.0 recommended), relay 1.2.0 or newer (1.4.0
+for short invite codes).
 
 - **No more Copying panel popping up:** the dashboard's **Copies on other sites** shows a
   spinner, progress, speed and time left while copying, and **The IBS** a spinner when
