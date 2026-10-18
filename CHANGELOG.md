@@ -3,6 +3,13 @@
 Each release says what to update and which launcher and relay it works with: IBS,
 the launcher and the relay are released separately.
 
+## Unreleased
+
+- **Line speed and copying speed are told apart:** "Speed" is now **Line speed** (what the
+  connection carries, measured on large transfers); "copying" is what actually arrives,
+  lower because each copy is also read and stored. While copies move, the diagram shows
+  their speed and direction on the connection.
+
 ## 1.7.5
 
 **What to update:** sites, under **Settings → Updates**; nodes follow.

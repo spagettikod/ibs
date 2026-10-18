@@ -90,7 +90,7 @@ export default function NetworkPage() {
         ) : (
           <table>
             <thead>
-              <tr><th>Site</th><th>Version</th><th>Connection</th><th>Ping</th><th>Speed</th><th>Shared</th><th>Our data there</th><th>Their data here</th></tr>
+              <tr><th>Site</th><th>Version</th><th>Connection</th><th>Ping</th><th title="What the connection can carry, measured on large transfers">Line speed</th><th>Shared</th><th>Our data there</th><th>Their data here</th></tr>
             </thead>
             <tbody>
               {peers.map((p) => (
@@ -111,7 +111,7 @@ export default function NetworkPage() {
                     {(p.out_bps > 0 || p.removing > 0) && <> <Spinner title={p.out_bps > 0 ? 'Copies on their way there' : 'Deleted copies being removed there'} /></>}
                     <div className="muted small">{p.replicas_out.toLocaleString()} blocks</div></Counted>
                     {p.removing > 0 && <div className="muted small">{p.removing.toLocaleString()} deleted, being removed there</div>}
-                    {p.out_bps > 0 && <div className="small accent-text">copying {fmtSpeed(p.out_bps)}</div>}</td>
+                    {p.out_bps > 0 && <div className="small accent-text" title="What actually arrives there, over the last 10 seconds">copying {fmtSpeed(p.out_bps)}</div>}</td>
                   <td><Counted ok={p.counted}>{fmtBytes(p.held_bytes)}
                     {p.in_bps > 0 && <> <Spinner title="Its copies arriving here" /></>}
                     <div className="muted small">{p.held_blocks.toLocaleString()} blocks</div></Counted>

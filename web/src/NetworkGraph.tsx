@@ -236,6 +236,25 @@ export default function NetworkGraph({ selfId, selfName, selfUpSince, sites, lin
             <text textAnchor="middle" y={5} className="initials">{initials(n.name)}</text>
           </g>
         ))}
+        {edges.map((e) => {
+          // While copies move: how fast, and to which site, on the connection.
+          const f = flow(e)
+          const lines = [
+            f.ab > 0 && `${fmtSpeed(f.ab)} → ${node(e.b)?.name}`,
+            f.ba > 0 && `${fmtSpeed(f.ba)} → ${node(e.a)?.name}`,
+          ].filter(Boolean) as string[]
+          if (lines.length === 0) return null
+          const g = geometry(e)
+          const w = 16 + Math.max(...lines.map((l) => l.length)) * 6.6
+          const h = 8 + lines.length * 15
+          return (
+            <g key={'flow' + e.key} className="edge-label" pointerEvents="none"
+              transform={`translate(${Math.min(Math.max(g.lx, w / 2 + 2), W - w / 2 - 2)},${g.ly + 16})`}>
+              <rect x={-w / 2} y={-h / 2} width={w} height={h} rx={6} />
+              {lines.map((l, i) => <text key={i} textAnchor="middle" y={-h / 2 + 15 + i * 15}>{l}</text>)}
+            </g>
+          )
+        })}
         {(() => {
           // Pointing at a connection: how fast copies move over it now.
           const e = !hover && hoverEdge ? edges.find((x) => x.key === hoverEdge) : undefined
@@ -245,7 +264,7 @@ export default function NetworkGraph({ selfId, selfName, selfUpSince, sites, lin
             f.ab > 0 && `${fmtSpeed(f.ab)} to ${node(e.b)?.name}`,
             f.ba > 0 && `${fmtSpeed(f.ba)} to ${node(e.a)?.name}`,
           ].filter(Boolean) as string[]
-          const text = parts.length ? 'Copying ' + parts.join(', ') : kindLabel(e.link)
+          const text = parts.length ? 'Copying ' + parts.join(', ') + ` (line ${fmtSpeed(e.link.bps)})` : kindLabel(e.link)
           const g = geometry(e)
           const w = 16 + text.length * 6.8
           return (
@@ -289,9 +308,9 @@ export default function NetworkGraph({ selfId, selfName, selfUpSince, sites, lin
               <strong>{node(selEdge.a)?.name} ↔ {node(selEdge.b)?.name}</strong>
               <span>{kindLabel(selEdge.link)}</span>
               <span>Ping {fmtMs(selEdge.link.rtt_ms)}</span>
-              <span>Speed {fmtSpeed(selEdge.link.bps)}</span>
+              <span title="What the connection can carry, measured on large transfers">Line speed {fmtSpeed(selEdge.link.bps)}</span>
               {(flow(selEdge).ab > 0 || flow(selEdge).ba > 0) && (
-                <span>Copying now: {[flow(selEdge).ab > 0 && `${fmtSpeed(flow(selEdge).ab)} to ${node(selEdge.b)?.name}`,
+                <span title="What actually arrives, over the last 10 seconds; less than the line speed, as each copy is also read and stored">Copying {[flow(selEdge).ab > 0 && `${fmtSpeed(flow(selEdge).ab)} to ${node(selEdge.b)?.name}`,
                   flow(selEdge).ba > 0 && `${fmtSpeed(flow(selEdge).ba)} to ${node(selEdge.a)?.name}`].filter(Boolean).join(', ')}</span>
               )}
               <span className="muted">reported by {node(selEdge.link.from)?.name} {ago(selEdge.link.updated)}</span>
