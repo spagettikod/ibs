@@ -343,6 +343,9 @@ label.check input { width: auto; margin-top: 3px; }
 .tile-link { display: block; }
 .tile-link .stat { height: 100%; }
 .tile-link:hover .stat { border-color: var(--accent); }
+.th-sort { all: unset; cursor: pointer; font: inherit; color: inherit; }
+.th-sort:hover { text-decoration: underline; }
+.th-sort:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
 .key-buckets { padding-left: 26px; gap: 6px; }
 .notice { padding: 10px 14px; border-radius: 10px; border: 1px solid var(--border); background: var(--panel); font-size: 13px; }
 .notice.warn { border-color: color-mix(in srgb, var(--warn) 50%, transparent); background: var(--warn-bg); color: var(--warn); }

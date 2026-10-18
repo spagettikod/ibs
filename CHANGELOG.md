@@ -3,6 +3,13 @@
 Each release says what to update and which launcher and relay it works with: IBS,
 the launcher and the relay are released separately.
 
+## Unreleased
+
+- **The bucket browser can be sorted** by name, size or date: click a column header,
+  again to reverse. Folders stay above files; the choice is remembered in the browser.
+  **Load all** loads a large folder completely, and folders on later pages now show too.
+- **GitHub is checked once a day** unless chosen otherwise (was every 15 minutes).
+
 ## 1.8.1
 
 **What to update:** sites, under **Settings → Updates**; nodes follow.

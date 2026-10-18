@@ -82,14 +82,14 @@ type updateState struct {
 }
 
 // CheckIntervals are how often GitHub can be asked for a new release, in
-// minutes: every 15 minutes (the default), 6 hours, or a day.
+// minutes: every 15 minutes, 6 hours, or a day (the default).
 var CheckIntervals = []int{15, 6 * 60, 24 * 60}
 
 // CheckInterval is how often GitHub is asked for a new release.
 func (s *Site) CheckInterval() time.Duration {
 	m := int(s.SettingInt("updates_interval"))
 	if !slices.Contains(CheckIntervals, m) {
-		m = CheckIntervals[0]
+		m = 24 * 60 // once a day unless set
 	}
 	return time.Duration(m) * time.Minute
 }

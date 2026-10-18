@@ -133,8 +133,37 @@ function ReplicationStatus({ b, sites }: { b: Bucket; sites?: number }) {
 type FolderInfo = { objects: number; bytes: number; latest: number } // latest: unix ms, -1 while recalculated
 type Listing = { objects: ObjectInfo[]; prefixes: string[]; folders: Record<string, FolderInfo>; truncated: boolean; next: string }
 
+type SortKey = 'name' | 'size' | 'modified'
+type Sort = { key: SortKey; desc: boolean }
+
+/** The browser's sort order, remembered in this browser. */
+function useSort(): [Sort, (k: SortKey) => void] {
+  const [sort, setSort] = useState<Sort>(() => {
+    try {
+      const s = JSON.parse(localStorage.getItem('ibs-browser-sort') ?? '')
+      if (['name', 'size', 'modified'].includes(s.key)) return { key: s.key, desc: !!s.desc }
+    } catch {
+      // none saved, or storage unavailable
+    }
+    return { key: 'name', desc: false }
+  })
+  const choose = (key: SortKey) => {
+    const next = { key, desc: sort.key === key ? !sort.desc : key !== 'name' } // size and date: largest and newest first
+    setSort(next)
+    try {
+      localStorage.setItem('ibs-browser-sort', JSON.stringify(next))
+    } catch {
+      // not remembered; fine
+    }
+  }
+  return [sort, choose]
+}
+
 function Browser({ bucket, prefix }: { bucket: string; prefix: string }) {
+  const [sort, chooseSort] = useSort()
   const [extra, setExtra] = useState<ObjectInfo[]>([])
+  const [extraPrefixes, setExtraPrefixes] = useState<string[]>([])
+  const [extraFolders, setExtraFolders] = useState<Record<string, FolderInfo>>({})
   const [next, setNext] = useState<string>()
   const { data, error, reload } = useLoader(
     () => api<Listing>('GET', `/api/buckets/${encodeURIComponent(bucket)}/objects?prefix=${encodeURIComponent(prefix)}`),
@@ -146,16 +175,36 @@ function Browser({ bucket, prefix }: { bucket: string; prefix: string }) {
 
   useEffect(() => {
     setExtra([])
+    setExtraPrefixes([])
+    setExtraFolders({})
     setNext(undefined)
     reload()
   }, [bucket, prefix, reload])
   useEffect(() => setNext(data?.truncated ? data.next : undefined), [data])
 
-  const loadMore = async () => {
-    if (!next) return
-    const more = await api<Listing>('GET', `/api/buckets/${encodeURIComponent(bucket)}/objects?prefix=${encodeURIComponent(prefix)}&marker=${encodeURIComponent(next)}`)
+  const [loadingAll, setLoadingAll] = useState(false)
+  const fetchPage = (marker: string) =>
+    api<Listing>('GET', `/api/buckets/${encodeURIComponent(bucket)}/objects?prefix=${encodeURIComponent(prefix)}&marker=${encodeURIComponent(marker)}`)
+  const addPage = (more: Listing) => {
     setExtra((x) => [...x, ...more.objects])
+    setExtraPrefixes((x) => [...x, ...more.prefixes])
+    setExtraFolders((x) => ({ ...x, ...more.folders }))
     setNext(more.truncated ? more.next : undefined)
+  }
+  const loadMore = async () => {
+    if (next) addPage(await fetchPage(next))
+  }
+  const loadAll = async () => {
+    setLoadingAll(true)
+    try {
+      for (let marker = next; marker; ) {
+        const more = await fetchPage(marker)
+        addPage(more)
+        marker = more.truncated ? more.next : undefined
+      }
+    } finally {
+      setLoadingAll(false)
+    }
   }
 
   const upload = async (files: FileList | null) => {
@@ -197,7 +246,28 @@ function Browser({ bucket, prefix }: { bucket: string; prefix: string }) {
   }
 
   const crumbs = prefix.split('/').filter(Boolean)
-  const objects = [...(data?.objects ?? []), ...extra]
+  const folders = { ...(data?.folders ?? {}), ...extraFolders }
+  const dir = sort.desc ? -1 : 1
+  const byName = (a: string, b: string) => dir * a.localeCompare(b)
+  // Folders first, then files, each in the chosen order; ties by name.
+  const prefixes = [...(data?.prefixes ?? []), ...extraPrefixes].sort((a, b) => {
+    const fa = folders[a], fb = folders[b]
+    const v = sort.key === 'size' ? (fa?.bytes ?? -1) - (fb?.bytes ?? -1)
+      : sort.key === 'modified' ? (fa?.latest ?? -1) - (fb?.latest ?? -1) : 0
+    return v !== 0 ? dir * v : byName(a, b)
+  })
+  const objects = [...(data?.objects ?? []), ...extra].sort((a, b) => {
+    const v = sort.key === 'size' ? a.size - b.size
+      : sort.key === 'modified' ? new Date(a.modified).getTime() - new Date(b.modified).getTime() : 0
+    return v !== 0 ? dir * v : byName(a.key, b.key)
+  })
+  const header = (key: SortKey, label: string) => (
+    <th className="sortable" aria-sort={sort.key === key ? (sort.desc ? 'descending' : 'ascending') : 'none'}>
+      <button type="button" className="th-sort" onClick={() => chooseSort(key)}>
+        {label}{sort.key === key && <span aria-hidden="true">{sort.desc ? ' ↓' : ' ↑'}</span>}
+      </button>
+    </th>
+  )
 
   return (
     <div className="page">
@@ -228,15 +298,15 @@ function Browser({ bucket, prefix }: { bucket: string; prefix: string }) {
           <Empty>This {prefix ? 'folder' : 'bucket'} is empty. Upload files here or with any S3 client.</Empty>
         ) : (
           <table>
-            <thead><tr><th>Name</th><th>Size</th><th>Modified</th><th /></tr></thead>
+            <thead><tr>{header('name', 'Name')}{header('size', 'Size')}{header('modified', 'Modified')}<th /></tr></thead>
             <tbody>
-              {data?.prefixes.map((p) => (
+              {prefixes.map((p) => (
                 <tr key={p}>
                   <td><a href="#" onClick={(e) => { e.preventDefault(); go(bucket, p) }}>📁 {p.slice(prefix.length)}</a></td>
-                  <td><Counted ok={!!data?.folders?.[p]}>{fmtBytes(data?.folders?.[p]?.bytes ?? 0)}
-                    <div className="muted small">{(data?.folders?.[p]?.objects ?? 0).toLocaleString()} {data?.folders?.[p]?.objects === 1 ? 'file' : 'files'}</div></Counted></td>
+                  <td><Counted ok={!!folders[p]}>{fmtBytes(folders[p]?.bytes ?? 0)}
+                    <div className="muted small">{(folders[p]?.objects ?? 0).toLocaleString()} {folders[p]?.objects === 1 ? 'file' : 'files'}</div></Counted></td>
                   <td title="The newest change to a file in this folder, at any depth">
-                    <Counted ok={(data?.folders?.[p]?.latest ?? -1) >= 0}>{new Date(data?.folders?.[p]?.latest ?? 0).toLocaleString()}</Counted></td>
+                    <Counted ok={(folders[p]?.latest ?? -1) >= 0}>{new Date(folders[p]?.latest ?? 0).toLocaleString()}</Counted></td>
                   <td className="right row-end"><button className="btn small danger" onClick={() => removeFolder(p)}>Delete</button></td>
                 </tr>
               ))}
@@ -254,7 +324,13 @@ function Browser({ bucket, prefix }: { bucket: string; prefix: string }) {
             </tbody>
           </table>
         )}
-        {next && <div className="more"><button className="btn" onClick={loadMore}>Load more</button></div>}
+        {next && (
+          <div className="more">
+            {sort.key !== 'name' && <span className="muted small">Sorted among what's loaded; load the rest to sort the whole folder. </span>}
+            <button className="btn" onClick={loadMore} disabled={loadingAll}>Load more</button>{' '}
+            <button className="btn" onClick={loadAll} disabled={loadingAll}>{loadingAll ? 'Loading…' : 'Load all'}</button>
+          </div>
+        )}
       </Card>
     </div>
   )
