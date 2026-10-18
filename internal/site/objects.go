@@ -129,6 +129,7 @@ func (s *Site) DeleteBucket(name string) error {
 	for _, q := range []string{
 		`DELETE FROM parts WHERE upload_id IN (SELECT id FROM uploads WHERE bucket = ?)`,
 		`DELETE FROM uploads WHERE bucket = ?`,
+		`DELETE FROM folders WHERE bucket = ?`,
 		`DELETE FROM buckets WHERE name = ?`,
 	} {
 		if _, err := tx.Exec(q, name); err != nil {
@@ -292,7 +293,8 @@ func decodeBlocks(s string) []BlockRef {
 // references from the old version to the new one.
 func (s *Site) commitObject(tx *sql.Tx, o *ObjectInfo) error {
 	var old string
-	err := tx.QueryRow(`SELECT blocks FROM objects WHERE bucket = ? AND key = ?`, o.Bucket, o.Key).Scan(&old)
+	var oldSize int64
+	err := tx.QueryRow(`SELECT blocks, size FROM objects WHERE bucket = ? AND key = ?`, o.Bucket, o.Key).Scan(&old, &oldSize)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
@@ -310,6 +312,13 @@ func (s *Site) commitObject(tx *sql.Tx, o *ObjectInfo) error {
 		if err := adjustRefs(tx, decodeBlocks(old), -1); err != nil {
 			return err
 		}
+	}
+	added := int64(1) // a new file, or one replaced
+	if old != "" {
+		added = 0
+	}
+	if err := folderStored(tx, o.Bucket, o.Key, added, o.Size-oldSize, o.Modified.UnixMilli()); err != nil {
+		return err
 	}
 	meta, _ := json.Marshal(o.Meta)
 	_, err = tx.Exec(`INSERT INTO objects(bucket, key, size, etag, content_type, modified, user_meta, blocks)
@@ -366,7 +375,8 @@ func (s *Site) DeleteObject(bucket, key string) error {
 	}
 	return s.inTx(func(tx *sql.Tx) error {
 		var blocks string
-		err := tx.QueryRow(`SELECT blocks FROM objects WHERE bucket = ? AND key = ?`, bucket, key).Scan(&blocks)
+		var size int64
+		err := tx.QueryRow(`SELECT blocks, size FROM objects WHERE bucket = ? AND key = ?`, bucket, key).Scan(&blocks, &size)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil // S3 delete is idempotent
 		}
@@ -377,6 +387,9 @@ func (s *Site) DeleteObject(bucket, key string) error {
 			return err
 		}
 		s.noteDelete(bucket)
+		if err := folderDeleted(tx, bucket, key, size); err != nil {
+			return err
+		}
 		return adjustRefs(tx, decodeBlocks(blocks), -1)
 	})
 }
@@ -409,16 +422,19 @@ func (s *Site) DeleteFolder(bucket, prefix string) (int64, error) {
 	for {
 		var n int64
 		err := s.inTx(func(tx *sql.Tx) error {
-			rows, err := tx.Query(`SELECT key, blocks FROM objects WHERE bucket = ? AND key >= ? AND key < ? ORDER BY key LIMIT 1000`,
+			rows, err := tx.Query(`SELECT key, blocks, size FROM objects WHERE bucket = ? AND key >= ? AND key < ? ORDER BY key LIMIT 1000`,
 				bucket, prefix, prefixEnd(prefix))
 			if err != nil {
 				return err
 			}
-			type obj struct{ key, blocks string }
+			type obj struct {
+				key, blocks string
+				size        int64
+			}
 			var batch []obj
 			for rows.Next() {
 				var o obj
-				rows.Scan(&o.key, &o.blocks)
+				rows.Scan(&o.key, &o.blocks, &o.size)
 				batch = append(batch, o)
 			}
 			rows.Close()
@@ -427,6 +443,9 @@ func (s *Site) DeleteFolder(bucket, prefix string) (int64, error) {
 					return err
 				}
 				if err := adjustRefs(tx, decodeBlocks(o.blocks), -1); err != nil {
+					return err
+				}
+				if err := folderDeleted(tx, bucket, o.key, o.size); err != nil {
 					return err
 				}
 			}

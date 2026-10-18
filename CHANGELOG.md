@@ -5,7 +5,11 @@ the launcher and the relay are released separately.
 
 ## Unreleased
 
-- The scrub history shows the date each scrub started; the time is on hover.
+- The scrub history shows the date each scrub started; the time is on hover. **Your
+  copies on other sites** shows the date and time of the last check.
+- **Folders in the bucket browser show their size, file count and latest change** (the
+  newest change to a file inside, at any depth). A folder is counted in the background
+  the first time it's shown, then kept up to date with every upload and delete.
 
 ## 1.8.0
 

@@ -783,6 +783,7 @@ func (s *Server) handleListObjects(w http.ResponseWriter, r *http.Request, st *s
 	return writeJSON(w, map[string]any{
 		"objects":   nonNil(res.Objects),
 		"prefixes":  nonNil(res.CommonPrefixes),
+		"folders":   st.Folders(r.PathValue("name"), res.CommonPrefixes),
 		"truncated": res.Truncated,
 		"next":      res.NextMarker,
 	})

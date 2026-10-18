@@ -791,3 +791,51 @@ func TestDeleteFolder(t *testing.T) {
 		t.Fatalf("left: %v", keys)
 	}
 }
+
+// A folder is counted when first shown, and from then on follows every file
+// stored and deleted; the running figures match a recount.
+func TestFolderFigures(t *testing.T) {
+	s := newTestSite(t)
+	ctx := context.Background()
+	s.CreateBucket("tree")
+	put := func(k, v string) { s.PutObject(ctx, "tree", k, strings.NewReader(v), "", nil) }
+	counted := func() {
+		for {
+			select {
+			case f := <-s.folderQueue:
+				s.countFolder(f[0], f[1])
+			default:
+				return
+			}
+		}
+	}
+	put("a/x", "12345")
+	put("a/b/y", "123")
+	if f := s.Folders("tree", []string{"a/", "a/b/"}); len(f) != 0 {
+		t.Fatalf("figures before counting: %+v", f)
+	}
+	counted()
+	put("a/b/z", "1")
+	put("top", "1234567")
+	put("a/x", "12") // replaced: smaller
+	if err := s.DeleteObject("tree", "a/b/z"); err != nil {
+		t.Fatal(err)
+	}
+	s.refreshFolderLatest()
+	f := s.Folders("tree", []string{"a/", "a/b/"})
+	if f["a/"].Objects != 2 || f["a/"].Bytes != 5 || f["a/b/"].Objects != 1 || f["a/b/"].Bytes != 3 || f["a/"].Latest <= 0 {
+		t.Fatalf("figures: %+v", f)
+	}
+	// The same as counting from scratch.
+	s.DB.Exec(`DELETE FROM folders`)
+	s.Folders("tree", []string{"a/", "a/b/"})
+	counted()
+	if again := s.Folders("tree", []string{"a/", "a/b/"}); again["a/"] != f["a/"] || again["a/b/"] != f["a/b/"] {
+		t.Fatalf("running %+v, recounted %+v", f, again)
+	}
+	// A deleted folder is gone.
+	s.DeleteFolder("tree", "a/")
+	if f := s.Folders("tree", []string{"a/", "a/b/"}); len(f) != 0 {
+		t.Fatalf("figures of a deleted folder: %+v", f)
+	}
+}

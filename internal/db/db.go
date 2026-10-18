@@ -240,6 +240,19 @@ CREATE TABLE IF NOT EXISTS scrub_skipped (
 	PRIMARY KEY (scrub_id, site_id, block_id)
 );
 
+-- Folder figures for the bucket browser (site/folders.go): per folder (key
+-- prefix ending in "/"), the files under it, their size and the newest change
+-- (unix ms; -1 while it's recalculated).
+CREATE TABLE IF NOT EXISTS folders (
+	bucket  TEXT NOT NULL,
+	prefix  TEXT NOT NULL,
+	objects INTEGER NOT NULL,
+	bytes   INTEGER NOT NULL,
+	latest  INTEGER NOT NULL,
+	PRIMARY KEY (bucket, prefix)
+);
+CREATE INDEX IF NOT EXISTS folders_latest ON folders(latest);
+
 -- Short invite codes this site gave out: the number claimed on a relay, the
 -- words both sites derive their key from, and the full invite sent once the
 -- joining site proves it knows the words. used: the one attempt was made.

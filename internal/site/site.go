@@ -81,6 +81,9 @@ type Site struct {
 	updates updateState
 	scrub   scrubState
 	act     activity // files arriving and being deleted (activity.go)
+	// Folders the bucket browser asked for that aren't counted yet (folders.go).
+	folderQueue  chan [2]string
+	folderQueued sync.Map
 	// scrubLimit keeps scrub reads to IBS_SCRUB_RATE: this site's scrubs and
 	// the checks other sites' scrubs ask for.
 	scrubLimit byteLimiter
@@ -173,6 +176,7 @@ func Open(cfg config.Config) (*Site, error) {
 		reconcile:      make(chan string, 64),
 		scrub:          scrubState{wake: make(chan struct{}, 1)},
 		relayMoveTried: map[string]time.Time{},
+		folderQueue:    make(chan [2]string, 256),
 		events:         newHub(),
 		relays:         map[string]*relayEntry{},
 		relayed:        newConnQueue(),
@@ -319,6 +323,7 @@ func (s *Site) Run(ctx context.Context) {
 	every(2*time.Second, "transfer-events", s.transferEvents)
 	every(500*time.Millisecond, "activity-events", func(context.Context) { s.activityEvents() })
 	go s.statsLoop(ctx)
+	go s.folderLatestLoop(ctx)
 	// Trimming surplus copies scans every block: only after changes (the
 	// replication loop clears replDirty; trimming catches up on its next
 	// pass), and every scanEvery.

@@ -130,7 +130,8 @@ function ReplicationStatus({ b, sites }: { b: Bucket; sites?: number }) {
   return <span className="pill ok">{b.replication} of {b.replication}</span>
 }
 
-type Listing = { objects: ObjectInfo[]; prefixes: string[]; truncated: boolean; next: string }
+type FolderInfo = { objects: number; bytes: number; latest: number } // latest: unix ms, -1 while recalculated
+type Listing = { objects: ObjectInfo[]; prefixes: string[]; folders: Record<string, FolderInfo>; truncated: boolean; next: string }
 
 function Browser({ bucket, prefix }: { bucket: string; prefix: string }) {
   const [extra, setExtra] = useState<ObjectInfo[]>([])
@@ -232,7 +233,10 @@ function Browser({ bucket, prefix }: { bucket: string; prefix: string }) {
               {data?.prefixes.map((p) => (
                 <tr key={p}>
                   <td><a href="#" onClick={(e) => { e.preventDefault(); go(bucket, p) }}>📁 {p.slice(prefix.length)}</a></td>
-                  <td /><td />
+                  <td><Counted ok={!!data?.folders?.[p]}>{fmtBytes(data?.folders?.[p]?.bytes ?? 0)}
+                    <div className="muted small">{(data?.folders?.[p]?.objects ?? 0).toLocaleString()} {data?.folders?.[p]?.objects === 1 ? 'file' : 'files'}</div></Counted></td>
+                  <td title="The newest change to a file in this folder, at any depth">
+                    <Counted ok={(data?.folders?.[p]?.latest ?? -1) >= 0}>{new Date(data?.folders?.[p]?.latest ?? 0).toLocaleString()}</Counted></td>
                   <td className="right row-end"><button className="btn small danger" onClick={() => removeFolder(p)}>Delete</button></td>
                 </tr>
               ))}

@@ -199,7 +199,7 @@ function CopiesCard() {
               <tr key={c.site_id}>
                 <td>{c.name}</td>
                 <td className="num">{c.copies.toLocaleString()}</td>
-                <td>{c.scrubbed ? ago(c.scrubbed) : <span className="muted">not yet</span>}</td>
+                <td title={c.scrubbed ? ago(c.scrubbed) : undefined}>{c.scrubbed ? when(c.scrubbed) : <span className="muted">not yet</span>}</td>
                 <td>{!c.scrubbed ? '—' : c.bad > 0
                   ? <span className="warn-text">{c.bad.toLocaleString()} missing or damaged, copied again from this site</span>
                   : `${c.checked.toLocaleString()} checked, all identical`}</td>
