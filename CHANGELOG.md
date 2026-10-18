@@ -11,6 +11,8 @@ the launcher and the relay are released separately.
   their speed and direction on the connection.
 - **Delete folders** in the bucket browser, with how many files and how much it holds in
   the confirmation. Large folders are deleted in the background.
+- **The diagram puts your site in the centre,** the other sites around it, and relays on
+  an inner ring between them.
 - **Choose how often GitHub is checked** for new versions: every 15 minutes, 6 hours or
   once a day (**Settings → Updates**).
 

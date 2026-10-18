@@ -90,8 +90,8 @@ function edgeClass(l: Link) {
 }
 
 /**
- * Map of the IBS: sites on a ring (this site on top, or on the left when
- * there are two), relays in the middle. Direct connections are solid lines
+ * Map of the IBS: this site in the centre, the other sites on a ring around
+ * it, relays on an inner ring between them. Direct connections are solid lines
  * that bend around relays in their way; relayed ones are dashed curves
  * through their relay. There are no labels: pointing at a site or relay shows its
  * name, and selecting a site or connection shows its details below. While
@@ -121,22 +121,27 @@ export default function NetworkGraph({ selfId, selfName, selfUpSince, sites, lin
       add(l.from, shortId(l.from), false, 0, 0)
     }
     const others = [...byId.values()].filter((n) => !n.self).sort((a, b) => a.name.localeCompare(b.name))
-    const ring = [byId.get(selfId)!, ...others]
-    // An ellipse that fills the box, leaving room for names below nodes.
+    // This site in the centre of its universe, the others on a ring around
+    // it, leaving room for names; one other site to the right, more starting
+    // at the top.
+    const self = byId.get(selfId)!
+    self.x = cx
+    self.y = cy
     const rx = Math.max(Math.min(cx - 56, 300), 60)
     const ry = cy - 52
-    // Two sites side by side, more around a ring starting at the top.
-    const start = ring.length === 2 ? Math.PI : -Math.PI / 2
-    ring.forEach((n, i) => {
-      const angle = start + (2 * Math.PI * i) / Math.max(ring.length, 1)
-      n.x = cx + rx * Math.cos(angle)
-      n.y = cy + ry * Math.sin(angle)
+    const n = others.length
+    const start = n === 1 ? 0 : -Math.PI / 2
+    others.forEach((o, i) => {
+      const angle = start + (2 * Math.PI * i) / Math.max(n, 1)
+      o.x = cx + rx * Math.cos(angle)
+      o.y = cy + ry * Math.sin(angle)
     })
 
-    const rr = relays.length > 1 ? 56 : 0
+    // Relays on an inner ring, between the directions of the sites, so lines
+    // to them and through them don't overlap the direct connections.
     const relayPos: RelayPos[] = relays.map((r, i) => {
-      const angle = Math.PI / 2 + (2 * Math.PI * i) / relays.length
-      return { ...r, x: cx + rr * Math.cos(angle), y: cy + rr * Math.sin(angle) }
+      const angle = start + Math.PI / Math.max(n, 2) + (2 * Math.PI * i) / relays.length
+      return { ...r, x: cx + 0.5 * rx * Math.cos(angle), y: cy + 0.5 * ry * Math.sin(angle) }
     })
 
     // One edge per pair of sites: this site's own report wins, otherwise the newest.
