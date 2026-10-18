@@ -69,47 +69,6 @@ function attention(d: Dashboard, tls?: TLSStatus, updates?: UpdatesInfo, scrub?:
   return out.sort((a, b) => rank[a.level] - rank[b.level])
 }
 
-/**
- * Shown while copies are being made or received: where they go, how fast,
- * what's left and about how long it takes, or why copying waits.
- */
-function Copying({ d }: { d: Dashboard }) {
-  const r = d.replication
-  const peers = d.peers ?? []
-  const sending = peers.filter((p) => p.out_bps > 0)
-  const receiving = peers.filter((p) => p.in_bps > 0)
-  const out = sending.reduce((n, p) => n + p.out_bps, 0)
-  if (r.copying === 0 && sending.length === 0 && receiving.length === 0) return null
-  const waiting = r.copying > 0 && out === 0
-    ? !peers.some((p) => p.online) ? 'Waiting: no other site is online'
-      : r.no_room > 0 ? 'Waiting: the other sites are full'
-      : 'Starting…'
-    : undefined
-  return (
-    <Card title="Copying">
-      <div className="copying">
-        {r.copying > 0 && (
-          <>
-            <div className="copying-head">
-              <b>{r.copying.toLocaleString()} blocks</b>
-              <span className="muted">{fmtBytes(r.copying_bytes)} left to copy to other sites</span>
-              {out > 0 && <span>{fmtSpeed(out)} · about {fmtDuration(r.copying_bytes / out)} left</span>}
-              {waiting && <span className="warn-text">{waiting}</span>}
-            </div>
-            <Meter used={r.copies_made} total={r.copies_possible} />
-          </>
-        )}
-        {(sending.length > 0 || receiving.length > 0) && (
-          <ul>
-            {sending.map((p) => <li key={'o' + p.site_id}><span className="pulse" />To {p.name}<span className="muted">{fmtSpeed(p.out_bps)}</span></li>)}
-            {receiving.map((p) => <li key={'i' + p.site_id}><span className="pulse" />From {p.name}, its copies<span className="muted">{fmtSpeed(p.in_bps)}</span></li>)}
-          </ul>
-        )}
-      </div>
-    </Card>
-  )
-}
-
 function Health({ items }: { items: Item[] }) {
   const problems = items.filter((i) => i.level !== 'info')
   const tone = problems.some((i) => i.level === 'bad') ? 'bad' : problems.length > 0 ? 'warn' : 'ok'
@@ -159,6 +118,11 @@ export default function DashboardPage() {
   // Of the copies the other sites can take now: with fewer sites than copies,
   // the rest wait for another site (the health list says so).
   const copied = r.copies_possible === 0 ? 100 : Math.floor((100 * r.copies_made) / r.copies_possible)
+  // Copies moving now: ours to other sites, theirs to this one.
+  const sendingBps = (data.peers ?? []).reduce((n, p) => n + p.out_bps, 0)
+  const receivingBps = (data.peers ?? []).reduce((n, p) => n + p.in_bps, 0)
+  const copyWait = !(data.peers ?? []).some((p) => p.online) ? 'waiting: no other site is online'
+    : r.no_room > 0 ? 'waiting: the other sites are full' : 'starting…'
   // Files arriving or being deleted right now; the figures catch up within seconds.
   const act = data.activity
   const busy = act?.writing && act?.deleting ? 'Files arriving and being deleted…'
@@ -178,13 +142,22 @@ export default function DashboardPage() {
       <ErrorBox error={error} />
 
       <Health items={attention(data, tls.data, updates.data, scrub.data)} />
-      {data.counted && <Copying d={data} />}
 
       <div className="tiles">
         {!data.counted ? (
           <>
             <Stat label="Your files" value={<Spinner />} sub="counting…" />
-            <Stat label="Copies on other sites" value={<Spinner />} sub="counting…" />
+            <Stat label="Copies on other sites"
+              value={<>{r.copying > 0 ? `${copied}%` : `${have} of ${want}`}{sendingBps > 0 && <> <Spinner title="Copying to other sites" /></>}</>}
+              tone={r.under_replicated === 0 ? 'ok' : 'warn'}
+              sub={r.copying > 0 ? <>
+                <Meter used={r.copies_made} total={r.copies_possible} />
+                {sendingBps > 0
+                  ? <>{fmtBytes(r.copying_bytes)} left · {fmtSpeed(sendingBps)} · about {fmtDuration(r.copying_bytes / sendingBps)}</>
+                  : <span className="warn-text">{copyWait}</span>}</>
+                : r.under_replicated > 0 && have < want ? `per file; the next needs ${want - have === 1 ? 'another site' : 'more sites'}`
+                : r.under_replicated > 0 ? `per file; ${r.under_replicated.toLocaleString()} blocks wait for room`
+                : 'per file, all in place'} />
             <Stat label="Room for your files" value={<Spinner />} sub="counting…" />
           </>
         ) : (
@@ -206,7 +179,9 @@ export default function DashboardPage() {
                   : <>{fmtBytes(mine)} of {fmtBytes(site.capacity)} used by your files</>}</>} />
           </>
         )}
-        <a className="tile-link" href="#/network"><Stat label="The IBS" value={`${online} of ${network.length + 1}`} sub="sites online" /></a>
+        <a className="tile-link" href="#/network"><Stat label="The IBS"
+          value={<>{`${online} of ${network.length + 1}`}{receivingBps > 0 && <> <Spinner title="Other sites' copies arriving" /></>}</>}
+          sub={receivingBps > 0 ? <>sites online<div className="accent-text">their copies arriving, {fmtSpeed(receivingBps)}</div></> : 'sites online'} /></a>
         <ScrubTile info={scrub.data} />
       </div>
 

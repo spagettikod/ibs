@@ -3,6 +3,13 @@
 Each release says what to update and which launcher and relay it works with: IBS,
 the launcher and the relay are released separately.
 
+## Unreleased
+
+- **No more Copying panel popping up:** the dashboard's **Copies on other sites** shows a
+  spinner, progress, speed and time left while copying, and **The IBS** a spinner when
+  other sites' copies arrive. **Connected sites** in The Known Universe shows a spinner
+  where copies move or deleted copies are being removed.
+
 ## 1.7.4
 
 **What to update:** sites, under **Settings → Updates**; nodes follow.

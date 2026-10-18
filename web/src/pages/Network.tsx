@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { api, Dashboard, PathInfo, RelayInfo, Settings } from '../api'
 import { ratesOf } from '../NetworkGraph'
 import { NetworkView, useNetworkView, ViewSwitch } from '../GeoMap'
-import { ago, Card, Copy, Counted, Empty, ErrorBox, fmtBytes, fmtMs, fmtSpeed, Meter, Modal, shortId, Status, uptime, useLoader, useSubmit, useTick, Version } from '../ui'
+import { ago, Card, Copy, Counted, Empty, ErrorBox, fmtBytes, fmtMs, fmtSpeed, Meter, Modal, shortId, Spinner, Status, uptime, useLoader, useSubmit, useTick, Version } from '../ui'
 
 export function PathBadge({ path, online }: { path: PathInfo; online: boolean }) {
   if (!online || !path.kind) return <span className="path none">Not connected</span>
@@ -107,11 +107,15 @@ export default function NetworkPage() {
                   <td className="num">{p.online ? fmtMs(p.path.rtt_ms) : '—'}</td>
                   <td className="num">{p.online ? fmtSpeed(p.path.bps) : '—'}</td>
                   <Shared capacity={p.capacity} free={p.free} />
-                  <td><Counted ok={p.counted}>{fmtBytes(p.bytes_out)}<div className="muted small">{p.replicas_out.toLocaleString()} blocks</div></Counted>
+                  <td><Counted ok={p.counted}>{fmtBytes(p.bytes_out)}
+                    {(p.out_bps > 0 || p.removing > 0) && <> <Spinner title={p.out_bps > 0 ? 'Copies on their way there' : 'Deleted copies being removed there'} /></>}
+                    <div className="muted small">{p.replicas_out.toLocaleString()} blocks</div></Counted>
                     {p.removing > 0 && <div className="muted small">{p.removing.toLocaleString()} deleted, being removed there</div>}
-                    {p.out_bps > 0 && <div className="small accent-text">+ {fmtSpeed(p.out_bps)} now</div>}</td>
-                  <td><Counted ok={p.counted}>{fmtBytes(p.held_bytes)}<div className="muted small">{p.held_blocks.toLocaleString()} blocks</div></Counted>
-                    {p.in_bps > 0 && <div className="small accent-text">+ {fmtSpeed(p.in_bps)} now</div>}</td>
+                    {p.out_bps > 0 && <div className="small accent-text">copying {fmtSpeed(p.out_bps)}</div>}</td>
+                  <td><Counted ok={p.counted}>{fmtBytes(p.held_bytes)}
+                    {p.in_bps > 0 && <> <Spinner title="Its copies arriving here" /></>}
+                    <div className="muted small">{p.held_blocks.toLocaleString()} blocks</div></Counted>
+                    {p.in_bps > 0 && <div className="small accent-text">arriving {fmtSpeed(p.in_bps)}</div>}</td>
                 </tr>
               ))}
             </tbody>
