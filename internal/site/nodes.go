@@ -185,6 +185,18 @@ func (s *Site) refreshLocalNode(ctx context.Context) {
 	s.updateNodeStorage(LocalNodeID, s.cfg.StorageLimit, capacity, free)
 }
 
+// nodeUsedCached is nodeUsed from the cached figures (stats.go) when there
+// are any: it's asked on every heartbeat, and counting takes a while on large
+// sites.
+func (s *Site) nodeUsedCached(id string) int64 {
+	if s.statsRunning.Load() {
+		if st := s.statsCache.Load(); st != nil {
+			return st.Nodes[id].Used
+		}
+	}
+	return s.nodeUsed(id)
+}
+
 // nodeUsed returns the bytes IBS stores on a node: this site's blocks and
 // blocks held for other sites.
 func (s *Site) nodeUsed(id string) int64 {
@@ -208,12 +220,17 @@ func (s *Site) updateNodeStorage(id string, envLimit, diskCapacity, diskFree int
 		s.DB.QueryRow(`SELECT ui_limit FROM nodes WHERE id = ?`, id).Scan(&ui)
 		quota = ui.Int64
 	}
-	capacity, free := diskCapacity, diskFree
+	// What IBS can use is what it stores on the node plus the disk's free
+	// space, not the disk's size: the disk may hold other things too. Without
+	// a limit that's only shown, so the cached figure will do; a limit is
+	// enforced with what IBS stores there exactly.
+	capacity, free := min(diskCapacity, s.nodeUsedCached(id)+diskFree), diskFree
 	if quota < 0 {
 		capacity, free = 0, 0 // shares nothing; existing blocks stay until moved or removed
 	} else if quota > 0 {
-		capacity = min(quota, diskCapacity)
-		free = min(diskFree, max(quota-s.nodeUsed(id), 0))
+		used := s.nodeUsed(id)
+		capacity = min(quota, used+diskFree)
+		free = min(diskFree, max(quota-used, 0))
 	}
 	_, err := s.DB.Exec(`UPDATE nodes SET quota = ?, env_limit = ?, disk_capacity = ?, disk_free = ?, capacity = ?, free = ? WHERE id = ?`,
 		quota, envLimit, diskCapacity, diskFree, capacity, free, id)

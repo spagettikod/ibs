@@ -15,6 +15,9 @@ the launcher and the relay are released separately.
   an inner ring between them.
 - **A running scrub says about how long it has left** and when it should be done, on
   the Scrub page and the dashboard. The scrub history shows when each scrub started.
+- **A node without a limit shares its free space,** not its disk's size: what IBS stores
+  there plus what's empty. The Nodes page, the dashboard and what other sites see use
+  that, and **Change share** says how much IBS can use at most.
 - **Choose how often GitHub is checked** for new versions: every 15 minutes, 6 hours or
   once a day (**Settings → Updates**).
 

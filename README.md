@@ -246,7 +246,7 @@ services:
       IBS_JOIN_TOKEN: <token>
 ```
 
-How much of each node's disk IBS may use is set under **Nodes → Change**, or with
+How much of each node's disk IBS may use is set under **Nodes → Change share**, or with
 `IBS_STORAGE_LIMIT` on the node. A node gets IBS, and every update, from its manager.
 
 ### Direct connections
@@ -303,7 +303,7 @@ Environment variables. All are optional.
 | `IBS_S3_DOMAIN` | | Enables `bucket.domain` S3 addresses |
 | `IBS_SCRUB_RATE` | `100M` | How fast a scrub may read, per second, also when other sites' scrubs check their copies here |
 | `IBS_SITE_NAME` | | With `IBS_ADMIN_PASSWORD`: create the site on first start (phrase in the log) |
-| `IBS_STORAGE_LIMIT` | whole disk | Disk space for IBS, e.g. `500G`, `2T`; `0` = none. Overrides **Nodes → Change** |
+| `IBS_STORAGE_LIMIT` | all free space | Disk space for IBS, e.g. `500G`, `2T`; `0` = none. Overrides **Nodes → Change share** |
 | `IBS_TLS_CA` | Let's Encrypt | ACME directory URL; `staging` = Let's Encrypt's test CA |
 | `IBS_TLS_DNS_PROPAGATION_WAIT` | | Wait this long (e.g. `2m`) instead of checking the DNS record |
 | `IBS_TLS_DNS_PROVIDER` | | DNS provider code for HTTPS, see [HTTPS](#https) |
@@ -327,7 +327,7 @@ Environment variables. All are optional.
 | `IBS_NODE_ADDR` | `:7480` | Listen address |
 | `IBS_NODE_ADVERTISE` | connection IP | Address the manager should use (behind NAT) |
 | `IBS_NODE_NAME` | hostname | Display name |
-| `IBS_STORAGE_LIMIT` | whole disk | Disk space for IBS, e.g. `500G`, `2T`. Overrides **Nodes → Change** |
+| `IBS_STORAGE_LIMIT` | all free space | Disk space for IBS, e.g. `500G`, `2T`. Overrides **Nodes → Change share** |
 
 ### Relay variables
 
@@ -392,9 +392,10 @@ Environment variables. All are optional.
 your own files need it, the copies move away. You never have to set aside space for
 others.
 
-Your site's storage is what its nodes' limits allow (**Nodes → Change**, or
-`IBS_STORAGE_LIMIT`). It holds your own files and the copies your site keeps for other
-sites:
+Your site's storage is what its nodes' limits allow (**Nodes → Change share**, or
+`IBS_STORAGE_LIMIT`). Without a limit a node shares all free space on its disk: what IBS
+stores there plus what's empty, so it shrinks when other things fill the disk. It holds
+your own files and the copies your site keeps for other sites:
 
 - **Other sites' copies use free space, not your space.** They may fill any free space
   except a small margin (5% of your storage, at most 1 GB), so your uploads always have
@@ -440,7 +441,7 @@ page shows how many.
 
 <details><summary><b>Retire a storage node</b></summary>
 
-1. **Nodes → Change** next to it, and choose **Nothing** (or restart it with
+1. **Nodes → Change share** next to it, and choose **Nothing** (or restart it with
    `-e IBS_STORAGE_LIMIT=0`). Its blocks move to your other nodes.
 2. When the **Nodes** page shows 0 blocks for it, remove it there and stop the
    container.
@@ -450,7 +451,7 @@ page shows how many.
 <details><summary><b>Uploads fail with StorageFull</b></summary>
 
 No node has room within its storage limit. Add a node, or raise a node's limit under
-**Nodes → Change**. The dashboard shows how much of the space other sites' copies use.
+**Nodes → Change share**. The dashboard shows how much of the space other sites' copies use.
 
 </details>
 

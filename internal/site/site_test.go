@@ -345,12 +345,13 @@ func TestNodeQuota(t *testing.T) {
 	if n.Quota != 1<<20 || n.Capacity != 1<<20 || n.Used < 600<<10 || n.Free > (1<<20)-(600<<10) {
 		t.Fatalf("unexpected node figures: %+v", n)
 	}
-	// Removing the limit makes the whole disk available again.
+	// Without a limit IBS may use what it stores plus the disk's free space
+	// (not the disk's size: the disk may hold other things).
 	s.cfg.StorageLimit = 0
 	s.refreshLocalNode(ctx)
 	nodes, _ = s.Nodes()
-	if nodes[0].Capacity != nodes[0].DiskCapacity {
-		t.Fatalf("capacity should be the disk size without a limit: %+v", nodes[0])
+	if nodes[0].Capacity != nodes[0].Used+nodes[0].DiskFree || nodes[0].Capacity >= nodes[0].DiskCapacity {
+		t.Fatalf("capacity should be what IBS stores plus the free space: %+v", nodes[0])
 	}
 }
 
@@ -488,7 +489,7 @@ func TestNodeLimitFromWebInterface(t *testing.T) {
 	if err := s.SetNodeLimit(LocalNodeID, 0); err != nil {
 		t.Fatal(err)
 	}
-	if nodes, _ = s.Nodes(); nodes[0].Quota != 0 || nodes[0].Capacity != nodes[0].DiskCapacity {
+	if nodes, _ = s.Nodes(); nodes[0].Quota != 0 || nodes[0].Capacity != nodes[0].Used+nodes[0].DiskFree {
 		t.Fatalf("whole disk not restored: %+v", nodes[0])
 	}
 

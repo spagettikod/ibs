@@ -67,7 +67,7 @@ export default function NodesPage() {
                   <td className="mono">IBS_STORAGE_LIMIT</td>
                   <td>
                     Optional. How much of the node's disk IBS may use, e.g. <code>500G</code> or <code>2T</code>. Leave the line
-                    out to share the whole disk, or to set the limit here on the Nodes page instead. When set, it takes
+                    out to share all free space, or to set the limit here on the Nodes page instead. When set, it takes
                     precedence over the Nodes page. The same setting works on the manager; <code>0</code> means it stores
                     nothing itself.
                   </td>
@@ -121,8 +121,11 @@ export default function NodesPage() {
                   {n.quota > 0 && n.used >= n.quota && <div className="small warn-text">Over the limit, no new blocks</div>}
                 </td>
                 <td>
-                  {n.quota < 0 ? 'Nothing' : n.quota ? fmtBytes(n.quota) : 'Whole disk'}
-                  <div className="muted small">of {fmtBytes(n.disk_capacity)} disk{n.limit_from_env ? ', set with IBS_STORAGE_LIMIT' : ''}</div>
+                  {n.quota < 0 ? 'Nothing' : n.quota ? `Up to ${fmtBytes(n.quota)}` : `All free space: ${fmtBytes(n.used + n.disk_free)}`}
+                  <div className="muted small">
+                    {n.quota > 0 && n.quota > n.used + n.disk_free && `IBS can use ${fmtBytes(n.used + n.disk_free)} of it; `}
+                    {fmtBytes(n.disk_free)} empty on the disk{n.limit_from_env ? ', set with IBS_STORAGE_LIMIT' : ''}
+                  </div>
                 </td>
                 <td><MetadataCopy node={n} current={current} /></td>
                 <td className="right">
@@ -165,10 +168,11 @@ function LimitDialog({ node, onClose, onSaved }: { node: NodeInfo; onClose: () =
     <Modal title={`Storage on ${node.name}`} onClose={onClose}>
       <form className="stack" onSubmit={save}>
         <p className="muted small">
-          How much of this node's disk ({fmtBytes(node.disk_capacity)}) IBS may use, for your files and other sites' copies
-          together. IBS uses {fmtBytes(node.used)} on it now.
+          How much of this node's disk IBS may use, for your files and other sites' copies together. IBS uses{' '}
+          {fmtBytes(node.used)} on it now and the disk has {fmtBytes(node.disk_free)} empty, so IBS can use at most{' '}
+          <b>{fmtBytes(node.used + node.disk_free)}</b>.
         </p>
-        <label className="check"><input type="radio" checked={mode === 'whole'} onChange={() => setMode('whole')} /><span>The whole disk</span></label>
+        <label className="check"><input type="radio" checked={mode === 'whole'} onChange={() => setMode('whole')} /><span>All free space <small className="muted">— grows and shrinks with what else is on the disk</small></span></label>
         <label className="check">
           <input type="radio" checked={mode === 'size'} onChange={() => setMode('size')} />
           <span className="stack">
