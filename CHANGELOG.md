@@ -3,6 +3,10 @@
 Each release says what to update and which launcher and relay it works with: IBS,
 the launcher and the relay are released separately.
 
+## Unreleased
+
+- The scrub history shows the date each scrub started; the time is on hover.
+
 ## 1.8.0
 
 **What to update:** sites, under **Settings → Updates**; nodes follow.

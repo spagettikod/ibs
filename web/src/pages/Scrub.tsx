@@ -158,7 +158,9 @@ export default function ScrubPage() {
             <tbody>
               {data.history.map((h) => (
                 <tr key={h.id}>
-                  <td title={ago(h.started)}>{when(h.started)}<div className="muted small">{h.manual ? 'by hand' : 'on schedule'}</div></td>
+                  <td title={`${new Date(h.started * 1000).toLocaleString()}, ${ago(h.started)}`}>
+                    {new Date(h.started * 1000).toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' })}
+                    <div className="muted small">{h.manual ? 'by hand' : 'on schedule'}</div></td>
                   <td>{h.finished ? fmtDuration(h.finished - h.started) : h.state === 'paused' ? 'paused' : 'running'}</td>
                   <td className="num">{fmtBytes(h.bytes)}<div className="muted small">{h.checked.toLocaleString()} here{h.copies > 0 && `, ${h.copies.toLocaleString()} elsewhere`}</div></td>
                   <td>{h.state === 'stopped' ? <span className="muted">Stopped · </span> : null}{scrubResult(h)}</td>
