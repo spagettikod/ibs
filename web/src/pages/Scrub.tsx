@@ -20,6 +20,24 @@ const PHASE: Record<Scrub['phase'], string> = {
   held: 'Checking copies kept for other sites that they haven\'t checked lately',
 }
 
+/** When a running scrub should be done, from its pace so far; rough, as the
+ * pace depends on block sizes and on the other sites. */
+export function scrubEta(sc: Scrub): { left: number; at: Date } | undefined {
+  const done = sc.checked + sc.copies
+  const spent = Date.now() / 1000 - sc.started
+  if (sc.state !== 'running' || done < 50 || spent < 30 || done >= sc.total) return undefined
+  const left = (spent * (sc.total - done)) / done
+  return { left, at: new Date(Date.now() + left * 1000) }
+}
+
+/** A date and time, shorter for today. */
+export function when(unix: number) {
+  const d = new Date(unix * 1000)
+  const today = new Date().toDateString() === d.toDateString()
+  return today ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : d.toLocaleString([], { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
 export function scrubPercent(sc: Scrub) {
   return sc.total > 0 ? Math.min(100, Math.floor((100 * (sc.checked + sc.copies)) / sc.total)) : 0
 }
@@ -49,6 +67,7 @@ export default function ScrubPage() {
     api(path === 'settings' ? 'PUT' : 'POST', `/api/scrub/${path}`, body).then(reload, (e) => setActionError(e.message))
   }
   const cur = data.current
+  const eta = cur ? scrubEta(cur) : undefined
   const shown = cur ?? data.last
 
   return (
@@ -77,12 +96,13 @@ export default function ScrubPage() {
         {cur ? (
           <div className="stack">
             <div className="scrub-progress">
-              <b>{cur.state === 'paused' ? 'Paused' : PHASE[cur.phase]} · {scrubPercent(cur)}%</b>
+              <b>{cur.state === 'paused' ? 'Paused' : PHASE[cur.phase]} · {scrubPercent(cur)}%
+                {eta && <span className="muted"> · about {fmtDuration(eta.left)} left, done around {when(eta.at.getTime() / 1000)}</span>}</b>
               <Meter used={cur.checked + cur.copies} total={cur.total} />
               <span className="muted small">
                 {(cur.checked + cur.copies).toLocaleString()} of {cur.total.toLocaleString()} checked
                 ({cur.checked.toLocaleString()} here, {cur.copies.toLocaleString()} copies on other sites), {fmtBytes(cur.bytes)} of data ·
-                started {ago(cur.started)} {cur.manual ? 'by hand' : 'on schedule'} · {scrubResult(cur)}
+                started {when(cur.started)} {cur.manual ? 'by hand' : 'on schedule'} · {scrubResult(cur)}
               </span>
             </div>
           </div>
@@ -138,7 +158,7 @@ export default function ScrubPage() {
             <tbody>
               {data.history.map((h) => (
                 <tr key={h.id}>
-                  <td>{ago(h.started)}<div className="muted small">{h.manual ? 'by hand' : 'on schedule'}</div></td>
+                  <td title={ago(h.started)}>{when(h.started)}<div className="muted small">{h.manual ? 'by hand' : 'on schedule'}</div></td>
                   <td>{h.finished ? fmtDuration(h.finished - h.started) : h.state === 'paused' ? 'paused' : 'running'}</td>
                   <td className="num">{fmtBytes(h.bytes)}<div className="muted small">{h.checked.toLocaleString()} here{h.copies > 0 && `, ${h.copies.toLocaleString()} elsewhere`}</div></td>
                   <td>{h.state === 'stopped' ? <span className="muted">Stopped · </span> : null}{scrubResult(h)}</td>

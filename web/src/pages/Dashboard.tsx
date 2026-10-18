@@ -2,7 +2,7 @@ import { api, Dashboard, ScrubInfo, TLSStatus, UpdatesInfo } from '../api'
 import { NetworkView, useNetworkView, ViewSwitch } from '../GeoMap'
 import { ratesOf } from '../NetworkGraph'
 import { ago, Card, ErrorBox, fmtBytes, fmtDuration, fmtSpeed, Meter, Spinner, Stat, uptime, useLoader, useTick } from '../ui'
-import { scrubPercent, scrubResult } from './Scrub'
+import { scrubEta, scrubPercent, scrubResult } from './Scrub'
 
 type Item = { level: 'bad' | 'warn' | 'info'; text: string; href: string; link: string }
 
@@ -221,7 +221,8 @@ function ScrubTile({ info }: { info?: ScrubInfo }) {
       <a className="tile-link" href="#/scrub">
         <Stat label="Scrub" value={cur.state === 'paused' ? `Paused at ${scrubPercent(cur)}%` : `${scrubPercent(cur)}%`}
           tone={cur.failed > 0 ? 'bad' : undefined}
-          sub={<><Meter used={cur.checked + cur.copies} total={cur.total} />{(cur.checked + cur.copies).toLocaleString()} of {cur.total.toLocaleString()} checked</>} />
+          sub={<><Meter used={cur.checked + cur.copies} total={cur.total} />{(cur.checked + cur.copies).toLocaleString()} of {cur.total.toLocaleString()} checked
+            {scrubEta(cur) && <div>about {fmtDuration(scrubEta(cur)!.left)} left</div>}</>} />
       </a>
     )
   }
