@@ -24,6 +24,7 @@ type Props = {
   rates?: Rates
 }
 
+
 function kindLabel(l: Link) {
   if (!l.online || !l.kind) return 'Not connected'
   if (l.kind === 'quic') return 'Direct (QUIC)'
@@ -31,9 +32,9 @@ function kindLabel(l: Link) {
   return l.relay_name ? `Via relay · ${l.relay_name}` : 'Via relay'
 }
 
-/** Two letters for a site: initials of its name's parts, e.g. "site-a" → "SA". */
+/** Two letters for a site: initials of its name's parts, e.g. "site-a" and "siteA" → "SA". */
 function initials(name: string) {
-  const parts = name.split(/[^\p{L}\p{N}]+/u).filter(Boolean)
+  const parts = name.replace(/(\p{Ll})(\p{Lu})/gu, '$1 $2').split(/[^\p{L}\p{N}]+/u).filter(Boolean)
   if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
   return name.slice(0, 2).toUpperCase()
 }
@@ -52,36 +53,115 @@ function useWidth() {
   return { ref, width }
 }
 
-const relayClearance = 46 // how far a direct line stays from a relay it doesn't use
+type Pt = { x: number; y: number }
+type Route = { d: string; lx: number; ly: number; pts: Pt[] }
 
-/**
- * A direct connection: a straight line, or, when that would pass a relay, a
- * curve around it, so it never looks like it goes through the relay.
- */
-function directPath(a: { x: number; y: number }, b: { x: number; y: number }, relays: { x: number; y: number }[]) {
-  const mx = (a.x + b.x) / 2
-  const my = (a.y + b.y) / 2
+/** A quadratic curve from a to b with control point q, as a path and as points along it. */
+function quad(a: Pt, q: Pt, b: Pt): Route {
+  const pts: Pt[] = []
+  for (let i = 0; i <= 16; i++) {
+    const t = i / 16
+    pts.push({ x: (1 - t) ** 2 * a.x + 2 * (1 - t) * t * q.x + t ** 2 * b.x, y: (1 - t) ** 2 * a.y + 2 * (1 - t) * t * q.y + t ** 2 * b.y })
+  }
+  return { d: `M${a.x},${a.y}Q${q.x},${q.y} ${b.x},${b.y}`, lx: pts[8].x, ly: pts[8].y, pts }
+}
+
+/** An arc from a to b, bent by k times its length to the left (negative: right). */
+function arc(a: Pt, b: Pt, k: number) {
   const dx = b.x - a.x
   const dy = b.y - a.y
-  const len = Math.hypot(dx, dy) || 1
-  let nx = -dy / len
-  let ny = dx / len
-  // The relay closest to the line, if it's in the way.
-  let near: { x: number; y: number } | undefined
-  let nearDist = relayClearance
-  for (const r of relays) {
-    const t = Math.max(0, Math.min(1, ((r.x - a.x) * dx + (r.y - a.y) * dy) / (len * len)))
-    const d = Math.hypot(a.x + t * dx - r.x, a.y + t * dy - r.y)
-    if (d < nearDist) { near = r; nearDist = d }
+  return quad(a, { x: (a.x + b.x) / 2 - dy * k, y: (a.y + b.y) / 2 + dx * k }, b)
+}
+
+// Bends tried for each line, the preferred first: the house bow, then
+// shallower and deeper, then the other side, and straight as a last resort.
+// Most make a line at most 40% longer, so lines stay easy to follow; the
+// deepest only when nothing else gets past.
+const bow = 0.22
+const bends = [bow, 0.14, 0.32, 0.42, -bow, -0.14, -0.32, -0.42, 0.06, -0.06, 0, 0.55, -0.55]
+
+type Obstacle = Pt & { id: string; r: number }
+
+function segmentsCross(p1: Pt, p2: Pt, p3: Pt, p4: Pt) {
+  const d = (a: Pt, b: Pt, c: Pt) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
+  const d1 = d(p3, p4, p1), d2 = d(p3, p4, p2), d3 = d(p1, p2, p3), d4 = d(p1, p2, p4)
+  return d1 * d2 < 0 && d3 * d4 < 0
+}
+
+/** How many times two lines cross, not counting where they meet at a shared end. */
+function crossings(a: Pt[], b: Pt[], shared: Pt[]) {
+  let n = 0
+  for (let i = 1; i < a.length; i++) {
+    for (let j = 1; j < b.length; j++) {
+      if (!segmentsCross(a[i - 1], a[i], b[j - 1], b[j])) continue
+      if (shared.some((s) => Math.hypot(a[i].x - s.x, a[i].y - s.y) < 34)) continue
+      n++
+    }
   }
-  if (!near) return { d: `M${a.x},${a.y}L${b.x},${b.y}`, lx: mx, ly: my }
-  // Bend to the side away from the relay (below it when it's right on the line).
-  let side = (near.x - mx) * nx + (near.y - my) * ny
-  if (Math.abs(side) < 1 ? ny < 0 : side > 0) { nx = -nx; ny = -ny; side = -side }
-  const k = 2 * (relayClearance + side) // side <= 0: the curve's middle ends up relayClearance from the relay
-  const qx = mx + nx * k
-  const qy = my + ny * k
-  return { d: `M${a.x},${a.y}Q${qx},${qy} ${b.x},${b.y}`, lx: mx + (nx * k) / 2, ly: my + (ny * k) / 2 }
+  return n
+}
+
+/** How much of line a runs on top of line b, away from where they meet: 0 to 1. */
+function alongside(a: Pt[], b: Pt[], shared: Pt[]) {
+  let n = 0
+  for (const p of a) {
+    if (shared.some((s) => Math.hypot(p.x - s.x, p.y - s.y) < 34)) continue
+    if (b.some((q) => Math.hypot(p.x - q.x, p.y - q.y) < 8)) n++
+  }
+  return n / a.length
+}
+
+function pathLength(pts: Pt[]) {
+  let l = 0
+  for (let i = 1; i < pts.length; i++) l += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y)
+  return l
+}
+
+type Wire = { key: string; a: Pt & { id: string }; b: Pt & { id: string }; weight: number }
+
+/**
+ * Bends every line so it passes no site or relay and crosses as few other
+ * lines as it can, preferring the house bow and short lines. Lines are placed
+ * the most important and longest first, then once more now that all the
+ * others are known.
+ */
+function route(wires: Wire[], obstacles: Obstacle[]) {
+  const chosen = new Map<string, Route>()
+  const free = [...wires]
+    .sort((x, y) => y.weight - x.weight || Math.hypot(y.b.x - y.a.x, y.b.y - y.a.y) - Math.hypot(x.b.x - x.a.x, x.b.y - x.a.y))
+  const cost = (w: Wire, r: Route, k: number) => {
+    let c = 0
+    for (const o of obstacles) {
+      if (o.id === w.a.id || o.id === w.b.id) continue
+      const near = Math.min(...r.pts.map((p) => Math.hypot(p.x - o.x, p.y - o.y)))
+      if (near < o.r + 14) c += 1000 * (1 + (o.r + 14 - near) / 10)
+    }
+    for (const v of wires) {
+      const other = chosen.get(v.key)
+      if (v.key === w.key || !other) continue
+      const shared = [w.a, w.b].filter((p) => p.id === v.a.id || p.id === v.b.id)
+      c += 100 * crossings(r.pts, other.pts, shared) * Math.min(w.weight, v.weight)
+      c += 60 * alongside(r.pts, other.pts, shared)
+    }
+    const straight = Math.hypot(w.b.x - w.a.x, w.b.y - w.a.y) || 1
+    c += 30 * (pathLength(r.pts) / straight - 1) // longer lines are harder to follow
+    c += 8 * Math.abs(k - bow) + (k === 0 ? 6 : 0) // the house style
+    return c
+  }
+  for (let pass = 0; pass < 2; pass++) {
+    for (const w of free) {
+      chosen.delete(w.key)
+      let best: Route | undefined
+      let bestCost = Infinity
+      for (const k of bends) {
+        const r = arc(w.a, w.b, k)
+        const c = cost(w, r, k)
+        if (c < bestCost) { best = r; bestCost = c }
+      }
+      chosen.set(w.key, best!)
+    }
+  }
+  return chosen
 }
 
 function edgeClass(l: Link) {
@@ -91,9 +171,9 @@ function edgeClass(l: Link) {
 
 /**
  * Map of the IBS: this site in the centre, the other sites on a ring around
- * it, relays on an inner ring between them. Direct connections are solid lines
- * that bend around relays in their way; relayed ones are dashed curves
- * through their relay. There are no labels: pointing at a site or relay shows its
+ * it, relays on an inner ring between them. Direct connections are solid arcs,
+ * bent so they pass no site or relay and cross as few lines as possible;
+ * relayed ones are dashed curves through their relay. There are no labels: pointing at a site or relay shows its
  * name, and selecting a site or connection shows its details below. While
  * copies move between this site and another, dots run along their connection
  * in the direction they go; pointing at it shows the speed.
@@ -166,22 +246,51 @@ export default function NetworkGraph({ selfId, selfName, selfUpSince, sites, lin
   // Sites with a connection through a relay, as "site|relay".
   const throughRelay = new Set(edges.filter((e) => e.link.online && e.link.kind === 'relay' && e.link.relay)
     .flatMap((e) => [`${e.a}|${e.link.relay}`, `${e.b}|${e.link.relay}`]))
-  const relayOf = (id?: string) => relayPos.find((r) => r.id === id)
+  
+  // Every line's path: through its relay for relayed connections, the
+  // others bent around sites, relays and each other.
+  const routes = useMemo(() => {
+    const at = (id: string) => nodes.find((n) => n.id === id)
+    const wires: Wire[] = []
+    for (const e of edges) {
+      const a = at(e.a)
+      const b = at(e.b)
+      if (!a || !b) continue
+      const r = e.link.kind === 'relay' ? relayPos.find((x) => x.id === e.link.relay) : undefined
+      const weight = e.link.online ? 2 : 1
+      if (r) {
+        // Through the relay: an arc to it and one on from it.
+        const via = { ...r, id: 'relay:' + r.id }
+        wires.push({ key: e.key + '>1', a, b: via, weight }, { key: e.key + '>2', a: via, b, weight })
+      } else {
+        wires.push({ key: e.key, a, b, weight })
+      }
+    }
+    for (const u of uplinks) {
+      const a = at(u.from)
+      const r = relayPos.find((x) => x.id === u.relay)
+      // A connection through the relay already runs through it.
+      if (!a || !r || throughRelay.has(`${u.from}|${u.relay}`)) continue
+      wires.push({ key: 'up:' + u.from + u.to, a, b: { ...r, id: 'relay:' + r.id }, weight: 1 })
+    }
+    const obstacles: Obstacle[] = [
+      ...nodes.map((n) => ({ id: n.id, x: n.x, y: n.y, r: n.self ? 24 : 20 })),
+      ...relayPos.map((r) => ({ id: 'relay:' + r.id, x: r.x, y: r.y, r: 20 })),
+    ]
+    const routes = route(wires, obstacles)
+    // Join the two arcs of each line through a relay. Its label sits away
+    // from this site, on the far arc.
+    for (const e of edges) {
+      const r1 = routes.get(e.key + '>1')
+      const r2 = routes.get(e.key + '>2')
+      if (!r1 || !r2) continue
+      const far = e.a === selfId ? r2 : r1
+      routes.set(e.key, { d: r1.d + r2.d.replace(/^M[^Q]*/, ''), lx: far.lx, ly: far.ly, pts: [...r1.pts, ...r2.pts.slice(1)] })
+    }
+    return routes
+  }, [nodes, edges, uplinks, relayPos]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Geometry of an edge: straight for direct, a curve through the relay otherwise.
-  const geometry = (e: Edge) => {
-    const a = node(e.a)!
-    const b = node(e.b)!
-    const r = e.link.kind === 'relay' ? relayOf(e.link.relay) : undefined
-    if (!r) return directPath(a, b, relayPos)
-    // Control point so the curve passes through the relay at its middle.
-    const qx = 2 * r.x - (a.x + b.x) / 2
-    const qy = 2 * r.y - (a.y + b.y) / 2
-    const t = e.a === selfId ? 0.72 : e.b === selfId ? 0.28 : 0.5 // label away from this site and the relay
-    const lx = (1 - t) ** 2 * a.x + 2 * (1 - t) * t * qx + t ** 2 * b.x
-    const ly = (1 - t) ** 2 * a.y + 2 * (1 - t) * t * qy + t ** 2 * b.y
-    return { d: `M${a.x},${a.y}Q${qx},${qy} ${b.x},${b.y}`, lx, ly }
-  }
+  const geometry = (e: Edge) => routes.get(e.key) ?? { d: '', lx: 0, ly: 0 }
 
   // Copy traffic on an edge of this site, from a to b and back.
   const flow = (e: Edge) => {
@@ -201,11 +310,8 @@ export default function NetworkGraph({ selfId, selfName, selfUpSince, sites, lin
     <div className="netgraph" ref={ref}>
       <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} role="img" aria-label="Map of the known universe">
         {uplinks.map((u) => {
-          const a = node(u.from)
-          const r = relayOf(u.relay)
-          // A connection through the relay already runs through it.
-          if (!a || !r || throughRelay.has(`${u.from}|${u.relay}`)) return null
-          return <line key={u.from + u.to} x1={a.x} y1={a.y} x2={r.x} y2={r.y} className={`uplink ${u.online ? '' : 'offline'}`} />
+          const r = routes.get('up:' + u.from + u.to)
+          return r && <path key={u.from + u.to} d={r.d} className={`uplink ${u.online ? '' : 'offline'}`} />
         })}
         {edges.map((e) => {
           const g = geometry(e)

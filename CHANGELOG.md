@@ -9,6 +9,9 @@ the launcher and the relay are released separately.
   your other sites use: no relay token and no site ID. Your other sites vouch for your
   site on the relay (relay 1.5.0) and the restore finds them itself. With an older relay
   it works if your site was registered with it.
+- **The diagram's lines are gentle arcs**, bent so they pass no site or relay and cross
+  as few other lines as possible, without long detours.
+- Sites named like "siteA" show as "SA" in the diagram (was "SI").
 
 ## 1.8.2
 
