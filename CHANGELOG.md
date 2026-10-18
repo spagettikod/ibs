@@ -6,8 +6,10 @@ the launcher and the relay are released separately.
 ## Unreleased
 
 - **The bucket browser can be sorted** by name, size or date: click a column header,
-  again to reverse. Folders stay above files; the choice is remembered in the browser.
-  **Load all** loads a large folder completely, and folders on later pages now show too.
+  again to reverse. The whole folder is sorted, not just the files shown. Folders stay
+  above files; the choice is remembered in the browser.
+- **Large folders show 2,000 files at a time**, with **Next 2,000** and **Load all**.
+  Loaded files stay when the folder changes.
 - **GitHub is checked once a day** unless chosen otherwise (was every 15 minutes).
 
 ## 1.8.1

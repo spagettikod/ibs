@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useRef, useState } from 'react'
 import { api, Bucket, ObjectInfo, StorableCapacity } from '../api'
+import { subscribe } from '../events'
 import { Card, Counted, Empty, ErrorBox, fmtBytes, fmtDate, Spinner, useLoader } from '../ui'
 
 function route(): { bucket?: string; prefix: string } {
@@ -130,8 +131,12 @@ function ReplicationStatus({ b, sites }: { b: Bucket; sites?: number }) {
   return <span className="pill ok">{b.replication} of {b.replication}</span>
 }
 
-type FolderInfo = { objects: number; bytes: number; latest: number } // latest: unix ms, -1 while recalculated
-type Listing = { objects: ObjectInfo[]; prefixes: string[]; folders: Record<string, FolderInfo>; truncated: boolean; next: string }
+// A folder of the browser in the chosen order: all subfolders (with the first
+// page), then a page of files. latest: unix ms. next: offset of the next page, 0 at the end.
+type FolderEntry = { prefix: string; counted: boolean; objects: number; bytes: number; latest: number }
+type Listing = { folders: FolderEntry[]; objects: ObjectInfo[]; files: number; next: number }
+const PAGE = 2000
+const MAX_PAGE = 10000 // the most the site sends at once
 
 type SortKey = 'name' | 'size' | 'modified'
 type Sort = { key: SortKey; desc: boolean }
@@ -161,49 +166,44 @@ function useSort(): [Sort, (k: SortKey) => void] {
 
 function Browser({ bucket, prefix }: { bucket: string; prefix: string }) {
   const [sort, chooseSort] = useSort()
-  const [extra, setExtra] = useState<ObjectInfo[]>([])
-  const [extraPrefixes, setExtraPrefixes] = useState<string[]>([])
-  const [extraFolders, setExtraFolders] = useState<Record<string, FolderInfo>>({})
-  const [next, setNext] = useState<string>()
-  const { data, error, reload } = useLoader(
-    () => api<Listing>('GET', `/api/buckets/${encodeURIComponent(bucket)}/objects?prefix=${encodeURIComponent(prefix)}`),
-    ['data'],
-  )
+  // The site sorts the whole folder; more pages follow in the same order. A
+  // reload fetches as many files as are shown, so loaded pages stay.
+  const url = (offset: number, limit: number) => `/api/buckets/${encodeURIComponent(bucket)}/browse?prefix=${encodeURIComponent(prefix)}` +
+    `&sort=${sort.key}&desc=${sort.desc ? 1 : 0}&offset=${offset}&limit=${limit}`
+  const want = useRef(PAGE)
+  const shown = useRef(0)
+  const { data, error, reload } = useLoader(async () => {
+    const l = await api<Listing>('GET', url(0, PAGE))
+    while (l.next > 0 && l.objects.length < want.current) {
+      const more = await api<Listing>('GET', url(l.next, Math.min(MAX_PAGE, want.current - l.objects.length)))
+      l.objects.push(...more.objects)
+      l.next = more.next
+    }
+    shown.current = l.objects.length
+    return l
+  })
+  const [loadingMore, setLoadingMore] = useState(false)
   const [uploading, setUploading] = useState<string>()
   const [uploadError, setUploadError] = useState<string>()
   const fileInput = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    setExtra([])
-    setExtraPrefixes([])
-    setExtraFolders({})
-    setNext(undefined)
+    want.current = PAGE
     reload()
-  }, [bucket, prefix, reload])
-  useEffect(() => setNext(data?.truncated ? data.next : undefined), [data])
+  }, [bucket, prefix, sort.key, sort.desc, reload])
+  // Follow changes made elsewhere, but not for very long listings: fetching
+  // them again on every change would keep the site busy.
+  useEffect(() => subscribe((changed) => {
+    if (changed.includes('data') && shown.current <= MAX_PAGE) reload()
+  }), [reload])
 
-  const [loadingAll, setLoadingAll] = useState(false)
-  const fetchPage = (marker: string) =>
-    api<Listing>('GET', `/api/buckets/${encodeURIComponent(bucket)}/objects?prefix=${encodeURIComponent(prefix)}&marker=${encodeURIComponent(marker)}`)
-  const addPage = (more: Listing) => {
-    setExtra((x) => [...x, ...more.objects])
-    setExtraPrefixes((x) => [...x, ...more.prefixes])
-    setExtraFolders((x) => ({ ...x, ...more.folders }))
-    setNext(more.truncated ? more.next : undefined)
-  }
-  const loadMore = async () => {
-    if (next) addPage(await fetchPage(next))
-  }
-  const loadAll = async () => {
-    setLoadingAll(true)
+  const load = async (all: boolean) => {
+    want.current = all ? Infinity : (data?.objects.length ?? 0) + PAGE
+    setLoadingMore(true)
     try {
-      for (let marker = next; marker; ) {
-        const more = await fetchPage(marker)
-        addPage(more)
-        marker = more.truncated ? more.next : undefined
-      }
+      await reload()
     } finally {
-      setLoadingAll(false)
+      setLoadingMore(false)
     }
   }
 
@@ -246,21 +246,9 @@ function Browser({ bucket, prefix }: { bucket: string; prefix: string }) {
   }
 
   const crumbs = prefix.split('/').filter(Boolean)
-  const folders = { ...(data?.folders ?? {}), ...extraFolders }
-  const dir = sort.desc ? -1 : 1
-  const byName = (a: string, b: string) => dir * a.localeCompare(b)
-  // Folders first, then files, each in the chosen order; ties by name.
-  const prefixes = [...(data?.prefixes ?? []), ...extraPrefixes].sort((a, b) => {
-    const fa = folders[a], fb = folders[b]
-    const v = sort.key === 'size' ? (fa?.bytes ?? -1) - (fb?.bytes ?? -1)
-      : sort.key === 'modified' ? (fa?.latest ?? -1) - (fb?.latest ?? -1) : 0
-    return v !== 0 ? dir * v : byName(a, b)
-  })
-  const objects = [...(data?.objects ?? []), ...extra].sort((a, b) => {
-    const v = sort.key === 'size' ? a.size - b.size
-      : sort.key === 'modified' ? new Date(a.modified).getTime() - new Date(b.modified).getTime() : 0
-    return v !== 0 ? dir * v : byName(a.key, b.key)
-  })
+  const folders = data?.folders ?? []
+  const objects = data?.objects ?? []
+  const next = data?.next ?? 0
   const header = (key: SortKey, label: string) => (
     <th className="sortable" aria-sort={sort.key === key ? (sort.desc ? 'descending' : 'ascending') : 'none'}>
       <button type="button" className="th-sort" onClick={() => chooseSort(key)}>
@@ -294,20 +282,20 @@ function Browser({ bucket, prefix }: { bucket: string; prefix: string }) {
       </header>
       <ErrorBox error={error ?? uploadError} />
       <Card>
-        {data && objects.length === 0 && data.prefixes.length === 0 ? (
+        {data && objects.length === 0 && folders.length === 0 ? (
           <Empty>This {prefix ? 'folder' : 'bucket'} is empty. Upload files here or with any S3 client.</Empty>
         ) : (
           <table>
             <thead><tr>{header('name', 'Name')}{header('size', 'Size')}{header('modified', 'Modified')}<th /></tr></thead>
             <tbody>
-              {prefixes.map((p) => (
-                <tr key={p}>
-                  <td><a href="#" onClick={(e) => { e.preventDefault(); go(bucket, p) }}>📁 {p.slice(prefix.length)}</a></td>
-                  <td><Counted ok={!!folders[p]}>{fmtBytes(folders[p]?.bytes ?? 0)}
-                    <div className="muted small">{(folders[p]?.objects ?? 0).toLocaleString()} {folders[p]?.objects === 1 ? 'file' : 'files'}</div></Counted></td>
+              {folders.map((f) => (
+                <tr key={f.prefix}>
+                  <td><a href="#" onClick={(e) => { e.preventDefault(); go(bucket, f.prefix) }}>📁 {f.prefix.slice(prefix.length)}</a></td>
+                  <td><Counted ok={f.objects > 0}>{fmtBytes(f.bytes)}
+                    <div className="muted small">{f.objects.toLocaleString()} {f.objects === 1 ? 'file' : 'files'}</div></Counted></td>
                   <td title="The newest change to a file in this folder, at any depth">
-                    <Counted ok={(folders[p]?.latest ?? -1) >= 0}>{new Date(folders[p]?.latest ?? 0).toLocaleString()}</Counted></td>
-                  <td className="right row-end"><button className="btn small danger" onClick={() => removeFolder(p)}>Delete</button></td>
+                    <Counted ok={f.counted}>{new Date(f.latest).toLocaleString()}</Counted></td>
+                  <td className="right row-end"><button className="btn small danger" onClick={() => removeFolder(f.prefix)}>Delete</button></td>
                 </tr>
               ))}
               {objects.map((o) => (
@@ -324,11 +312,11 @@ function Browser({ bucket, prefix }: { bucket: string; prefix: string }) {
             </tbody>
           </table>
         )}
-        {next && (
+        {next > 0 && data && (
           <div className="more">
-            {sort.key !== 'name' && <span className="muted small">Sorted among what's loaded; load the rest to sort the whole folder. </span>}
-            <button className="btn" onClick={loadMore} disabled={loadingAll}>Load more</button>{' '}
-            <button className="btn" onClick={loadAll} disabled={loadingAll}>{loadingAll ? 'Loading…' : 'Load all'}</button>
+            <span className="muted small">{objects.length.toLocaleString()} of {data.files.toLocaleString()} files shown. </span>
+            <button className="btn" onClick={() => load(false)} disabled={loadingMore}>Next {Math.min(PAGE, data.files - objects.length).toLocaleString()}</button>{' '}
+            <button className="btn" onClick={() => load(true)} disabled={loadingMore}>{loadingMore ? 'Loading…' : 'Load all'}</button>
           </div>
         )}
       </Card>

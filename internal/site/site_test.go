@@ -839,3 +839,48 @@ func TestFolderFigures(t *testing.T) {
 		t.Fatalf("figures of a deleted folder: %+v", f)
 	}
 }
+
+// Browsing sorts the whole folder, files a page at a time; subfolders come
+// first, sorted by their figures.
+func TestBrowse(t *testing.T) {
+	s := newTestSite(t)
+	ctx := context.Background()
+	s.CreateBucket("browse")
+	for _, f := range []struct{ k, v string }{
+		{"d/small", "1"}, {"d/large", "123456789"}, {"d/mid", "12345"},
+		{"d/sub1/x", "12"}, {"d/sub2/y", "1234567890123"}, {"d/sub2/z", "1"}, {"top", "x"},
+	} {
+		s.PutObject(ctx, "browse", f.k, strings.NewReader(f.v), "", nil)
+	}
+	l, err := s.Browse("browse", "d/", "size", true, 0, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if l.Files != 3 || len(l.Objects) != 2 || l.Objects[0].Key != "d/large" || l.Objects[1].Key != "d/mid" || l.Next != 2 {
+		t.Fatalf("first page by size: %d files, next %d, %+v", l.Files, l.Next, l.Objects)
+	}
+	if len(l.Folders) != 2 || l.Folders[0].Counted || l.Folders[1].Counted {
+		t.Fatalf("folders before counting: %+v", l.Folders)
+	}
+	for {
+		select {
+		case f := <-s.folderQueue:
+			s.countFolder(f[0], f[1])
+			continue
+		default:
+		}
+		break
+	}
+	l, _ = s.Browse("browse", "d/", "size", true, 0, 2)
+	if l.Folders[0].Prefix != "d/sub2/" || !l.Folders[0].Counted || l.Folders[0].Bytes != 14 {
+		t.Fatalf("folders by size: %+v", l.Folders)
+	}
+	next, _ := s.Browse("browse", "d/", "size", true, 2, 2)
+	if len(next.Objects) != 1 || next.Objects[0].Key != "d/small" || next.Next != 0 || len(next.Folders) != 0 {
+		t.Fatalf("second page: %+v", next)
+	}
+	root, _ := s.Browse("browse", "", "name", false, 0, 10)
+	if len(root.Folders) != 1 || root.Folders[0].Prefix != "d/" || root.Files != 1 {
+		t.Fatalf("root: %+v", root)
+	}
+}

@@ -3,6 +3,9 @@ package site
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"sort"
+	"strings"
 	"time"
 )
 
@@ -146,4 +149,110 @@ func (s *Site) refreshFolderLatest() int {
 		s.DB.Exec(`UPDATE folders SET latest = ? WHERE bucket = ? AND prefix = ? AND latest < 0`, latest, t[0], t[1])
 	}
 	return len(todo)
+}
+
+// Listing is one page of a folder in the bucket browser, in the chosen order:
+// all its subfolders (on the first page), then a page of its files.
+type Listing struct {
+	Folders []FolderEntry `json:"folders"`
+	Objects []ObjectInfo  `json:"objects"`
+	Files   int64         `json:"files"` // files directly in the folder, all pages
+	Next    int64         `json:"next"`  // offset of the next page; 0 when this is the last
+}
+
+// FolderEntry is a subfolder; Counted false until its figures are in.
+type FolderEntry struct {
+	Prefix  string `json:"prefix"`
+	Counted bool   `json:"counted"`
+	FolderInfo
+}
+
+// Browse lists a folder (prefix "" or ending in "/") of a bucket, sorted by
+// name, size or modified (desc to reverse), files from offset, limit at a
+// time. Subfolders come first, all of them, sorted by their figures; ones not
+// counted yet sort last (and get counted).
+func (s *Site) Browse(bucket, prefix, sortBy string, desc bool, offset, limit int64) (*Listing, error) {
+	if !s.BucketExists(bucket) {
+		return nil, ErrNoSuchBucket
+	}
+	if prefix != "" && !strings.HasSuffix(prefix, "/") {
+		return nil, errors.New("not a folder")
+	}
+	upper := prefixEnd(prefix)
+	if upper == "" {
+		upper = "\U0010FFFF"
+	}
+	order := map[string]string{"name": "key", "size": "size", "modified": "modified"}[sortBy]
+	if order == "" {
+		order, sortBy = "key", "name"
+	}
+	dir := "ASC"
+	if desc {
+		dir = "DESC"
+	}
+	out := &Listing{Folders: []FolderEntry{}, Objects: []ObjectInfo{}}
+	direct := `bucket = ? AND key >= ? AND key < ? AND instr(substr(key, ?), '/') = 0`
+	args := []any{bucket, prefix, upper, len(prefix) + 1}
+	if err := s.DB.QueryRow(`SELECT COUNT(*) FROM objects WHERE `+direct, args...).Scan(&out.Files); err != nil {
+		return nil, err
+	}
+	rows, err := s.DB.Query(`SELECT key, size, etag, content_type, modified FROM objects WHERE `+direct+
+		` ORDER BY `+order+` `+dir+`, key `+dir+` LIMIT ? OFFSET ?`, append(args, limit, offset)...)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		o := ObjectInfo{Bucket: bucket}
+		var modified int64
+		rows.Scan(&o.Key, &o.Size, &o.ETag, &o.ContentType, &modified)
+		o.Modified = time.UnixMilli(modified).UTC()
+		out.Objects = append(out.Objects, o)
+	}
+	rows.Close()
+	if offset+int64(len(out.Objects)) < out.Files {
+		out.Next = offset + int64(len(out.Objects))
+	}
+	if offset > 0 {
+		return out, nil
+	}
+
+	// Subfolders: from each, jump past everything under it to the next.
+	var prefixes []string
+	for from := prefix; ; {
+		var key string
+		if s.DB.QueryRow(`SELECT key FROM objects WHERE bucket = ? AND key >= ? AND key < ? AND instr(substr(key, ?), '/') > 0
+			ORDER BY key LIMIT 1`, bucket, from, upper, len(prefix)+1).Scan(&key) != nil {
+			break
+		}
+		p := key[:len(prefix)+strings.IndexByte(key[len(prefix):], '/')+1]
+		prefixes = append(prefixes, p)
+		if from = prefixEnd(p); from == "" {
+			break
+		}
+	}
+	figures := s.Folders(bucket, prefixes)
+	for _, p := range prefixes {
+		f, ok := figures[p]
+		out.Folders = append(out.Folders, FolderEntry{Prefix: p, Counted: ok && f.Latest >= 0, FolderInfo: f})
+	}
+	value := func(e FolderEntry) int64 {
+		switch sortBy {
+		case "size":
+			return e.Bytes
+		case "modified":
+			return e.Latest
+		}
+		return 0
+	}
+	sort.SliceStable(out.Folders, func(i, j int) bool {
+		a, b := out.Folders[i], out.Folders[j]
+		if sortBy != "name" && a.Counted != b.Counted {
+			return a.Counted // not counted yet: last
+		}
+		if va, vb := value(a), value(b); va != vb {
+			return (va < vb) != desc
+		}
+		return (a.Prefix < b.Prefix) != desc
+	})
+	return out, nil
 }

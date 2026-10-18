@@ -116,6 +116,21 @@ func (s *Server) routes() {
 		return st.DeleteBucket(r.PathValue("name"))
 	}))
 	m.HandleFunc("GET /api/buckets/{name}/objects", a(s.handleListObjects))
+	// The bucket browser: a folder sorted by name, size or modified, files a
+	// page at a time (subfolders with the first page).
+	m.HandleFunc("GET /api/buckets/{name}/browse", a(func(w http.ResponseWriter, r *http.Request, st *site.Site) error {
+		q := r.URL.Query()
+		offset, _ := strconv.ParseInt(q.Get("offset"), 10, 64)
+		limit, _ := strconv.ParseInt(q.Get("limit"), 10, 64)
+		if limit <= 0 || limit > 10000 {
+			limit = 2000
+		}
+		l, err := st.Browse(r.PathValue("name"), q.Get("prefix"), q.Get("sort"), q.Get("desc") == "1", max(offset, 0), limit)
+		if err != nil {
+			return badRequest(err.Error())
+		}
+		return writeJSON(w, l)
+	}))
 	m.HandleFunc("DELETE /api/buckets/{name}/objects", a(func(w http.ResponseWriter, r *http.Request, st *site.Site) error {
 		return st.DeleteObject(r.PathValue("name"), r.URL.Query().Get("key"))
 	}))
