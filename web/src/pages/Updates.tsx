@@ -150,10 +150,20 @@ export default function UpdatesSection() {
             <span>
               Check GitHub for new IBS releases
               <small className="muted">
-                {' '}Every 15 minutes. New versions are downloaded and checked, then installed when you choose (or automatically, if turned on below).
+                {' '}New versions are downloaded and checked, then installed when you choose (or automatically, if turned on below).
               </small>
             </span>
           </label>
+          {data.github && (
+            <label className="inline">
+              Check
+              <select value={data.check_minutes} onChange={(e) => act(() => api('PUT', '/api/updates/settings', { check_minutes: Number(e.target.value) }))}>
+                <option value={15}>every 15 minutes</option>
+                <option value={360}>every 6 hours</option>
+                <option value={1440}>once a day</option>
+              </select>
+            </label>
+          )}
           {data.github && data.github_error && <div className="small warn-text">Last check failed: {data.github_error}</div>}
           <label className="check">
             <input type="checkbox" checked={data.betas} onChange={(e) => act(() => api('PUT', '/api/updates/settings', { betas: e.target.checked }))} />

@@ -381,6 +381,69 @@ func (s *Site) DeleteObject(bucket, key string) error {
 	})
 }
 
+// FolderSize counts the files under a folder (prefix ending in "/") and
+// their size.
+func (s *Site) FolderSize(bucket, prefix string) (objects, bytes int64, err error) {
+	if !s.BucketExists(bucket) {
+		return 0, 0, ErrNoSuchBucket
+	}
+	if prefix == "" || !strings.HasSuffix(prefix, "/") {
+		return 0, 0, errors.New("not a folder")
+	}
+	err = s.DB.QueryRow(`SELECT COUNT(*), COALESCE(SUM(size), 0) FROM objects WHERE bucket = ? AND key >= ? AND key < ?`,
+		bucket, prefix, prefixEnd(prefix)).Scan(&objects, &bytes)
+	return objects, bytes, err
+}
+
+// DeleteFolder deletes every file under a folder (prefix ending in "/"), a
+// thousand at a time, so a large folder doesn't hold the database for long.
+// It returns how many it deleted.
+func (s *Site) DeleteFolder(bucket, prefix string) (int64, error) {
+	if !s.BucketExists(bucket) {
+		return 0, ErrNoSuchBucket
+	}
+	if prefix == "" || !strings.HasSuffix(prefix, "/") {
+		return 0, errors.New("not a folder")
+	}
+	var deleted int64
+	for {
+		var n int64
+		err := s.inTx(func(tx *sql.Tx) error {
+			rows, err := tx.Query(`SELECT key, blocks FROM objects WHERE bucket = ? AND key >= ? AND key < ? ORDER BY key LIMIT 1000`,
+				bucket, prefix, prefixEnd(prefix))
+			if err != nil {
+				return err
+			}
+			type obj struct{ key, blocks string }
+			var batch []obj
+			for rows.Next() {
+				var o obj
+				rows.Scan(&o.key, &o.blocks)
+				batch = append(batch, o)
+			}
+			rows.Close()
+			for _, o := range batch {
+				if _, err := tx.Exec(`DELETE FROM objects WHERE bucket = ? AND key = ?`, bucket, o.key); err != nil {
+					return err
+				}
+				if err := adjustRefs(tx, decodeBlocks(o.blocks), -1); err != nil {
+					return err
+				}
+			}
+			n = int64(len(batch))
+			return nil
+		})
+		if err != nil {
+			return deleted, err
+		}
+		if n == 0 {
+			return deleted, nil
+		}
+		deleted += n
+		s.noteDelete(bucket)
+	}
+}
+
 // CopyObject copies an object: its data is written again as new blocks, so
 // each file owns its blocks, as on a disk.
 func (s *Site) CopyObject(ctx context.Context, srcBucket, srcKey, dstBucket, dstKey string, replaceMeta bool, contentType string, meta map[string]string) (*ObjectInfo, error) {

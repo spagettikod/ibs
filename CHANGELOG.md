@@ -9,6 +9,10 @@ the launcher and the relay are released separately.
   connection carries, measured on large transfers); "copying" is what actually arrives,
   lower because each copy is also read and stored. While copies move, the diagram shows
   their speed and direction on the connection.
+- **Delete folders** in the bucket browser, with how many files and how much it holds in
+  the confirmation. Large folders are deleted in the background.
+- **Choose how often GitHub is checked** for new versions: every 15 minutes, 6 hours or
+  once a day (**Settings → Updates**).
 
 ## 1.7.5
 

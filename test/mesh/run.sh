@@ -42,7 +42,7 @@ check "site-a joins site-c with an invite"      bash -c "$(declare -f api dc); a
 echo "The IBS connects the rest"
 check "site-b connects to site-c on its own"    wait_for 60 peer_of site-b site-c
 check "site-c connects to site-b on its own"    wait_for 60 peer_of site-c site-b
-check "site-b registered with site-c's relay"   bash -c "$(declare -f api dc); api site-b GET /api/relays | grep -q relay-2"
+check "site-b registered with site-c's relay"   wait_for 30 bash -c "$(declare -f api dc); api site-b GET /api/relays | grep -q relay-2"
 
 echo "Copies"
 api site-b POST /api/buckets '{"name":"mesh"}' >/dev/null

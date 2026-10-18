@@ -119,6 +119,31 @@ func (s *Server) routes() {
 	m.HandleFunc("DELETE /api/buckets/{name}/objects", a(func(w http.ResponseWriter, r *http.Request, st *site.Site) error {
 		return st.DeleteObject(r.PathValue("name"), r.URL.Query().Get("key"))
 	}))
+	// Folders: their size, to confirm with, and deleting one (in the
+	// background; the bucket shows files being deleted until it's done).
+	m.HandleFunc("GET /api/buckets/{name}/folder", a(func(w http.ResponseWriter, r *http.Request, st *site.Site) error {
+		n, b, err := st.FolderSize(r.PathValue("name"), r.URL.Query().Get("prefix"))
+		if err != nil {
+			return badRequest(err.Error())
+		}
+		return writeJSON(w, map[string]int64{"objects": n, "bytes": b})
+	}))
+	m.HandleFunc("DELETE /api/buckets/{name}/folder", a(func(w http.ResponseWriter, r *http.Request, st *site.Site) error {
+		bucket, prefix := r.PathValue("name"), r.URL.Query().Get("prefix")
+		if _, _, err := st.FolderSize(bucket, prefix); err != nil {
+			return badRequest(err.Error())
+		}
+		go func() {
+			n, err := st.DeleteFolder(bucket, prefix)
+			if err != nil {
+				slog.Error("delete folder", "bucket", bucket, "folder", prefix, "deleted", n, "err", err)
+				return
+			}
+			slog.Info("deleted folder", "bucket", bucket, "folder", prefix, "files", n)
+		}()
+		w.WriteHeader(http.StatusAccepted)
+		return nil
+	}))
 	m.HandleFunc("POST /api/buckets/{name}/upload", a(s.handleUpload))
 	m.HandleFunc("GET /api/buckets/{name}/download", a(s.handleDownload))
 
@@ -218,6 +243,7 @@ func (s *Server) routes() {
 			GitHub *bool `json:"github"`
 			Betas  *bool `json:"betas"`
 			Auto   *bool `json:"auto_install"`
+			Every  *int  `json:"check_minutes"`
 		}
 		if err := readJSON(r, &req); err != nil {
 			return err
@@ -230,6 +256,11 @@ func (s *Server) routes() {
 		}
 		if req.Auto != nil {
 			st.SetAutoInstall(*req.Auto)
+		}
+		if req.Every != nil {
+			if err := st.SetCheckInterval(*req.Every); err != nil {
+				return badRequest(err.Error())
+			}
 		}
 		return writeJSON(w, st.Updates())
 	}))

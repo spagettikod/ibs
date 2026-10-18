@@ -177,8 +177,21 @@ function Browser({ bucket, prefix }: { bucket: string; prefix: string }) {
   }
 
   const remove = async (o: ObjectInfo) => {
-    if (!confirm(`Delete "${o.key}"?`)) return
+    if (!confirm(`Delete "${o.key}"? It is deleted here and on every other site, and can't be brought back.`)) return
     await api('DELETE', `/api/buckets/${encodeURIComponent(bucket)}/objects?key=${encodeURIComponent(o.key)}`).catch((e) => alert(e.message))
+    reload()
+  }
+
+  const removeFolder = async (p: string) => {
+    const base = `/api/buckets/${encodeURIComponent(bucket)}/folder?prefix=${encodeURIComponent(p)}`
+    try {
+      const size = await api<{ objects: number; bytes: number }>('GET', base)
+      if (!confirm(`Delete the folder "${p.slice(prefix.length)}" with ${size.objects.toLocaleString()} ${size.objects === 1 ? 'file' : 'files'} (${fmtBytes(size.bytes)})?\n\n` +
+        'They are deleted here and on every other site, and can\'t be brought back.')) return
+      await api('DELETE', base)
+    } catch (e) {
+      alert((e as Error).message)
+    }
     reload()
   }
 
@@ -219,7 +232,8 @@ function Browser({ bucket, prefix }: { bucket: string; prefix: string }) {
               {data?.prefixes.map((p) => (
                 <tr key={p}>
                   <td><a href="#" onClick={(e) => { e.preventDefault(); go(bucket, p) }}>📁 {p.slice(prefix.length)}</a></td>
-                  <td /><td /><td />
+                  <td /><td />
+                  <td className="right row-end"><button className="btn small danger" onClick={() => removeFolder(p)}>Delete</button></td>
                 </tr>
               ))}
               {objects.map((o) => (

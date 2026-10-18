@@ -763,3 +763,30 @@ func TestStatsCache(t *testing.T) {
 		t.Fatalf("figures from the cache: dashboard %+v %+v, bucket %+v, node %+v", d.Site, d.Replication, b[0], n[0])
 	}
 }
+
+// Deleting a folder deletes everything under it, and nothing beside it.
+func TestDeleteFolder(t *testing.T) {
+	s := newTestSite(t)
+	ctx := context.Background()
+	s.CreateBucket("folders")
+	for _, k := range []string{"a/x", "a/b/y", "a.txt", "ab/z", "other"} {
+		s.PutObject(ctx, "folders", k, strings.NewReader(k), "", nil)
+	}
+	if n, b, err := s.FolderSize("folders", "a/"); err != nil || n != 2 || b != int64(len("a/x")+len("a/b/y")) {
+		t.Fatalf("folder size: %d files, %d bytes, %v", n, b, err)
+	}
+	if _, err := s.DeleteFolder("folders", "a"); err == nil {
+		t.Fatal("deleted by a prefix that isn't a folder")
+	}
+	if n, err := s.DeleteFolder("folders", "a/"); err != nil || n != 2 {
+		t.Fatalf("deleted %d, %v", n, err)
+	}
+	res, _ := s.ListObjects("folders", "", "", "", 100)
+	var keys []string
+	for _, o := range res.Objects {
+		keys = append(keys, o.Key)
+	}
+	if strings.Join(keys, ",") != "a.txt,ab/z,other" {
+		t.Fatalf("left: %v", keys)
+	}
+}

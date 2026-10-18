@@ -81,8 +81,26 @@ type updateState struct {
 	}
 }
 
-// githubCheckInterval is how often GitHub is asked for a new release.
-const githubCheckInterval = 15 * time.Minute
+// CheckIntervals are how often GitHub can be asked for a new release, in
+// minutes: every 15 minutes (the default), 6 hours, or a day.
+var CheckIntervals = []int{15, 6 * 60, 24 * 60}
+
+// CheckInterval is how often GitHub is asked for a new release.
+func (s *Site) CheckInterval() time.Duration {
+	m := int(s.SettingInt("updates_interval"))
+	if !slices.Contains(CheckIntervals, m) {
+		m = CheckIntervals[0]
+	}
+	return time.Duration(m) * time.Minute
+}
+
+// SetCheckInterval sets how often GitHub is asked, in minutes (CheckIntervals).
+func (s *Site) SetCheckInterval(minutes int) error {
+	if !slices.Contains(CheckIntervals, minutes) {
+		return errors.New("check every 15 minutes, 6 hours or day")
+	}
+	return s.SetSetting("updates_interval", strconv.Itoa(minutes))
+}
 
 func (s *Site) store() release.Store { return release.Store{Dir: s.cfg.DataDir} }
 
@@ -226,13 +244,14 @@ type UpdatesInfo struct {
 	Keys            []KeyInfo     `json:"keys"`
 	Betas           bool          `json:"betas"` // betas count as new versions
 	AutoInstall     bool          `json:"auto_install"`
-	Newer           string        `json:"newer"` // newest version newer than the running one, held or seen; "" when up to date
+	CheckMinutes    int           `json:"check_minutes"` // how often GitHub is asked
+	Newer           string        `json:"newer"`         // newest version newer than the running one, held or seen; "" when up to date
 }
 
 func (s *Site) Updates() UpdatesInfo {
 	keys := s.store().Keys()
 	names := map[string]string{}
-	info := UpdatesInfo{Running: version.Version, Launcher: UnderLauncher(), LauncherVersion: LauncherVersion(), GitHub: s.GitHubChecks(), Betas: s.Betas(), AutoInstall: s.AutoInstall(), Versions: []VersionInfo{}, Seen: []SeenVersion{}}
+	info := UpdatesInfo{Running: version.Version, Launcher: UnderLauncher(), LauncherVersion: LauncherVersion(), GitHub: s.GitHubChecks(), Betas: s.Betas(), AutoInstall: s.AutoInstall(), CheckMinutes: int(s.CheckInterval().Minutes()), Versions: []VersionInfo{}, Seen: []SeenVersion{}}
 	for _, k := range keys {
 		names[k.ID] = k.Name
 		info.Keys = append(info.Keys, KeyInfo{ID: k.ID, Name: k.Name, Key: k.String(), Default: k.Default,
@@ -496,7 +515,7 @@ func (s *Site) fetchReleases(ctx context.Context) {
 	}
 	if s.GitHubChecks() {
 		s.updates.mu.Lock()
-		due := time.Since(s.updates.githubChecked) > githubCheckInterval
+		due := time.Since(s.updates.githubChecked) > s.CheckInterval()
 		s.updates.mu.Unlock()
 		if due {
 			s.checkGitHub(ctx)
