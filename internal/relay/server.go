@@ -16,6 +16,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"syscall"
 	"time"
@@ -25,6 +26,7 @@ import (
 
 const (
 	handshakeTimeout = 10 * time.Second
+	maxVouched       = 1000 // peers a site may vouch for
 	acceptTimeout    = 10 * time.Second
 	maxSplices       = 2000
 )
@@ -50,6 +52,10 @@ type control struct {
 	wmu    sync.Mutex
 	local  []string
 	token  string
+	// vouched are the keys of this site's peers ("vouch"): the relay lets
+	// them register without the secret, e.g. a site restored from its
+	// recovery phrase, and tells them who vouched for them ("vouchers").
+	vouched map[string]ed25519.PublicKey
 }
 
 func (c *control) send(m Msg) error {
@@ -342,15 +348,41 @@ func (s *Server) authorize(pub ed25519.PublicKey, secret, name string) bool {
 		return true
 	}
 	s.reload()
-	if secret == "" || !hmac.Equal([]byte(secret), []byte(s.st.Secret)) {
+	voucher := s.voucherLocked(pub)
+	if voucher == "" && (secret == "" || !hmac.Equal([]byte(secret), []byte(s.st.Secret))) {
 		return false
 	}
 	s.st.Sites[id] = siteEntry{Key: pub, Name: name, Added: time.Now().Unix()}
 	if err := s.save(); err != nil {
 		s.log.Error("save relay state", "err", err)
 	}
-	s.log.Info("site registered", "site", id[:8], "name", name)
+	if voucher != "" {
+		s.log.Info("site registered, vouched for by a peer", "site", id[:8], "name", name, "peer", voucher[:8])
+	} else {
+		s.log.Info("site registered", "site", id[:8], "name", name)
+	}
 	return true
+}
+
+// vouchersLocked returns the connected sites that vouch for pub: sites that
+// have it as a peer. Callers hold s.mu.
+func (s *Server) vouchersLocked(pub ed25519.PublicKey) []string {
+	id := keys.SiteID(pub)
+	var out []string
+	for sid, c := range s.controls {
+		if k, ok := c.vouched[id]; ok && k.Equal(pub) && sid != id {
+			out = append(out, sid)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func (s *Server) voucherLocked(pub ed25519.PublicKey) string {
+	if v := s.vouchersLocked(pub); len(v) > 0 {
+		return v[0]
+	}
+	return ""
 }
 
 func (s *Server) registered(pub ed25519.PublicKey) bool {
@@ -455,6 +487,21 @@ func (s *Server) runControl(c net.Conn, r *bufio.Reader, siteID string, hello Ms
 			s.mu.Lock()
 			ctl.local = m.Local
 			s.mu.Unlock()
+		case "vouch":
+			v := map[string]ed25519.PublicKey{}
+			for _, k := range m.Keys {
+				if len(k) == ed25519.PublicKeySize && len(v) < maxVouched {
+					v[keys.SiteID(k)] = ed25519.PublicKey(k)
+				}
+			}
+			s.mu.Lock()
+			ctl.vouched = v
+			s.mu.Unlock()
+		case "vouchers":
+			s.mu.Lock()
+			sites := s.vouchersLocked(ed25519.PublicKey(s.st.Sites[siteID].Key))
+			s.mu.Unlock()
+			ctl.send(Msg{Op: "vouchers", Req: m.Req, Sites: sites})
 		case "claim":
 			ctl.send(Msg{Op: "claimed", Req: m.Req, Error: s.claimCode(siteID, m.Name, m.Time)})
 		case "release":

@@ -112,4 +112,29 @@ dc start site-a >/dev/null 2>&1
 check "site-a finds out when it's back"         wait_for 60 bash -c "$(declare -f api dc not_peer_of); not_peer_of site-a site-c"
 check "and site-b doesn't take site-c back"     bash -c "sleep 12; $(declare -f api dc not_peer_of); not_peer_of site-b site-c && not_peer_of site-a site-c"
 
+
+echo "Restoring a lost site with only its recovery phrase"
+PHRASE=$(dc exec -T site-b ibs recovery-phrase | tr -d '\r')
+check "site-b's recovery phrase is printed"     bash -c "[ -n '$PHRASE' ]"
+dc rm -sfv site-b >/dev/null 2>&1
+dc up -d relay-4 >/dev/null 2>&1
+wait_for 30 dc exec -T relay-4 test -s /share/token
+T4=$(dc exec -T relay-4 cat /share/token)
+api site-a POST /api/relays "{\"address\":\"relay-4:7444\",\"token\":\"$T4\"}" >/dev/null
+relay4_up() { api site-a GET /api/relays | tr '{' '\n' | grep '"address":"relay-4:7444"' | grep -q '"connected":true'; }
+check "site-a uses a new relay, after site-b was lost" wait_for 30 relay4_up
+dc up -d site-b-new >/dev/null 2>&1
+wait_for 60 bash -c "$(declare -f dc); dc exec -T ctl curl -sf http://site-b-new:8080/api/state | grep -q '\"setup\":false'"
+restore() { dc exec -T ctl curl -s -H 'X-IBS: 1' -H 'Content-Type: application/json' \
+  -d "{\"phrase\":\"$PHRASE\",\"password\":\"changeme123\",\"relay_address\":\"relay-4:7444\"}" http://site-b-new:8080/api/setup/restore; }
+OUT=$(restore)
+RESTORED=0; [ -n "$OUT" ] && ! echo "$OUT" | grep -q '"error"' && RESTORED=1
+check "restored through it: no token, no site ID" test $RESTORED = 1 || echo "        $OUT"
+check "relay-4 says site-a vouched for it"      bash -c "$(declare -f dc); dc logs relay-4 2>&1 | grep -q 'vouched for by a peer'"
+check "site-a sees site-b online again"         wait_for 90 peer_of site-a site-b
+check "and site-b sees site-a"                  wait_for 60 peer_of site-b-new site-a
+check "its bucket is back"                      bash -c "$(declare -f api dc); api site-b-new GET /api/buckets | grep -q '\"mesh\"'"
+get() { dc exec -T ctl sh -c "curl -sf -b /tmp/jar-site-b-new 'http://site-b-new:8080/api/buckets/mesh/download?key=data.bin' | cmp -s - /tmp/data.bin"; }
+check "and its file, from the copy on site-a"   wait_for 120 get
+
 finish

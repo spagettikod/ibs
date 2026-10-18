@@ -2,7 +2,8 @@
 # relay-2, site-b none of its own. site-b joins site-a and site-a joins site-c,
 # so site-b and site-c are never invited to each other and share no relay at
 # first: they must still connect, through what the IBS tells them. relay-3 is
-# added to site-a later; the others take it up.
+# added to site-a later; the others take it up. At the end site-b is lost and
+# restored from its recovery phrase through relay-4, which it never used.
 x-site: &site
   image: ibs
   environment: &env
@@ -40,10 +41,21 @@ services:
     environment: { <<: *env, IBS_SITE_NAME: site-c, IBS_RELAY_ADDRESS: "relay-2:7444", IBS_RELAY_TOKEN_FILE: /relay/token }
     volumes: [relay2:/relay:ro]
     depends_on: [relay-2]
+  relay-4: # set up after site-b is lost; it never saw site-b
+    image: ibs-relay
+    profiles: [restore]
+    environment: { IBS_RELAY_ADVERTISE: "relay-4:7444", IBS_RELAY_TOKEN_OUT: /share/token }
+    volumes: [relay4:/share]
+    networks: [net]
+  site-b-new: # an empty site where site-b is restored
+    image: ibs
+    profiles: [restore]
+    environment: { IBS_STORAGE_LIMIT: 200M, IBS_CHECK_INTERVAL: 2s }
+    networks: [net]
   ctl:
     image: curlimages/curl:8.10.1
     entrypoint: ["sleep", "infinity"]
     networks: [net]
 
-volumes: { relay1: {}, relay2: {}, relay3: {} }
+volumes: { relay1: {}, relay2: {}, relay3: {}, relay4: {} }
 networks: { net: {} }

@@ -3,11 +3,13 @@ package relay
 import (
 	"bufio"
 	"context"
+	"crypto/ed25519"
 	"crypto/tls"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -43,7 +45,13 @@ type Client struct {
 	// (its token was regenerated), so the site can store it.
 	OnSecret func(secret string)
 
+	// Vouched returns the keys of the site's peers. The relay lets them
+	// register without the secret, so a peer restored from its recovery
+	// phrase gets back in.
+	Vouched func() []ed25519.PublicKey
+
 	mu        sync.Mutex
+	vouched   string // the keys last sent, to send again only on change
 	secret    string // the current registration secret, when it differs from Token's
 	ctl       net.Conn
 	wmu       sync.Mutex
@@ -167,6 +175,9 @@ func (c *Client) session(ctx context.Context) error {
 		<-sctx.Done()
 		conn.Close()
 	}()
+	c.mu.Lock()
+	c.vouched = ""
+	c.mu.Unlock()
 	go c.keepalive(sctx)
 	if c.OnConnect != nil {
 		go c.OnConnect()
@@ -195,7 +206,7 @@ func (c *Client) session(ctx context.Context) error {
 			if c.OnPunch != nil {
 				go c.OnPunch(m.From, m.Endpoints)
 			}
-		case "endpoints", "claimed":
+		case "endpoints", "claimed", "vouchers":
 			c.mu.Lock()
 			ch := c.reqs[m.Req]
 			delete(c.reqs, m.Req)
@@ -231,6 +242,7 @@ func (c *Client) keepalive(ctx context.Context) {
 		if c.Local != nil {
 			c.send(Msg{Op: "local", Local: c.Local()})
 		}
+		c.vouch()
 		c.probe()
 		select {
 		case <-ctx.Done():
@@ -238,6 +250,92 @@ func (c *Client) keepalive(ctx context.Context) {
 		case <-t.C:
 		}
 	}
+}
+
+// vouch sends the peers' keys when they changed. Relays before 1.5.0
+// ignore it.
+func (c *Client) vouch() {
+	if c.Vouched == nil {
+		return
+	}
+	ks := c.Vouched()
+	var b strings.Builder
+	list := make([][]byte, len(ks))
+	for i, k := range ks {
+		list[i] = k
+		b.Write(k)
+	}
+	c.mu.Lock()
+	same := c.vouched == b.String()
+	c.mu.Unlock()
+	if same || c.send(Msg{Op: "vouch", Keys: list}) != nil {
+		return
+	}
+	c.mu.Lock()
+	c.vouched = b.String()
+	c.mu.Unlock()
+}
+
+// Vouchers returns the sites connected to the relay that have this site as
+// a peer. Relays before 1.5.0 don't answer; that is reported as an error
+// after a few seconds.
+func (c *Client) Vouchers(ctx context.Context) ([]string, error) {
+	m, err := c.request(ctx, Msg{Op: "vouchers"}, "the relay can't tell which of your sites use it (it needs relay 1.5.0 or newer)")
+	if err != nil {
+		return nil, err
+	}
+	return m.Sites, nil
+}
+
+// request sends m on the control connection and waits for the answer with
+// the same request number.
+func (c *Client) request(ctx context.Context, m Msg, noAnswer string) (Msg, error) {
+	m.Req = c.nextReq.Add(1)
+	ch := make(chan Msg, 1)
+	c.mu.Lock()
+	if c.reqs == nil {
+		c.mu.Unlock()
+		return Msg{}, errors.New("not connected to relay")
+	}
+	c.reqs[m.Req] = ch
+	c.mu.Unlock()
+	defer func() {
+		c.mu.Lock()
+		delete(c.reqs, m.Req)
+		c.mu.Unlock()
+	}()
+	if err := c.send(m); err != nil {
+		return Msg{}, err
+	}
+	select {
+	case a := <-ch:
+		if a.Error != "" {
+			return Msg{}, errors.New(a.Error)
+		}
+		return a, nil
+	case <-time.After(5 * time.Second):
+		return Msg{}, errors.New(noAnswer)
+	case <-ctx.Done():
+		return Msg{}, ctx.Err()
+	}
+}
+
+// FetchKey connects to the relay at address and returns the key it
+// presents. Only for a restore, where the relay's key isn't known: what the
+// site fetches through it is checked end to end.
+func FetchKey(ctx context.Context, address string, cert tls.Certificate) (ed25519.PublicKey, error) {
+	d := tls.Dialer{NetDialer: &net.Dialer{Timeout: 10 * time.Second},
+		Config: &tls.Config{Certificates: []tls.Certificate{cert}, InsecureSkipVerify: true, MinVersion: tls.VersionTLS13}}
+	nc, err := d.DialContext(ctx, "tcp", address)
+	if err != nil {
+		return nil, fmt.Errorf("relay %s: %w", address, err)
+	}
+	defer nc.Close()
+	certs := nc.(*tls.Conn).ConnectionState().PeerCertificates
+	if len(certs) == 0 {
+		return nil, fmt.Errorf("relay %s presented no certificate", address)
+	}
+	return keys.PubFromCert(certs[0])
 }
 
 func (c *Client) probe() {

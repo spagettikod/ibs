@@ -14,6 +14,9 @@
 //
 // Only registered sites may use a relay. A site registers by presenting the
 // relay token's secret once; after that its key is on the relay's allowlist.
+// A site also registers without the secret when a connected site vouches for
+// it as a peer: that is how a site restored from its recovery phrase gets back
+// in through any relay its peers use.
 package relay
 
 import (
@@ -120,6 +123,8 @@ type Msg struct {
 	Time      int64    `json:"time,omitempty"`
 	Error     string   `json:"error,omitempty"`
 	Version   string   `json:"version,omitempty"` // in "welcome": the relay's version
+	Keys      [][]byte `json:"keys,omitempty"`    // in "vouch": the keys of the site's peers
+	Sites     []string `json:"sites,omitempty"`   // in "vouchers": sites vouching for this one
 }
 
 func writeMsg(w io.Writer, m Msg) error {

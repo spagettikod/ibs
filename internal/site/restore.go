@@ -23,8 +23,10 @@ import (
 )
 
 // RestoreOptions name the recovery phrase and where to fetch the metadata
-// backup: one of the site's own storage nodes, or a former peer (by its
-// direct address, or through a relay by its site ID).
+// backup: one of the site's own storage nodes, a former peer by its direct
+// address, or the address of a relay one of the former peers uses. A relay
+// token and the peer's site ID are optional: the relay lets the site in when
+// a connected peer vouches for it, and tells which peers do.
 type RestoreOptions struct {
 	Phrase       string
 	NodeAddress  string
@@ -39,6 +41,10 @@ type RestoreOptions struct {
 // encrypted metadata backup from a peer (which recognizes the site by its
 // key), checks the other peers for a newer generation, and resets local
 // state. Block data is healed from replicas in the background afterwards.
+// restoreWait is how long a restore through a relay before 1.5.0 waits for a
+// former peer to reach the site.
+const restoreWait = time.Minute
+
 func Restore(ctx context.Context, cfg config.Config, opt RestoreOptions) (*Site, error) {
 	if IsSetUp(cfg.DataDir) {
 		return nil, errors.New("site is already set up")
@@ -46,8 +52,8 @@ func Restore(ctx context.Context, cfg config.Config, opt RestoreOptions) (*Site,
 	if len(opt.Password) < 8 {
 		return nil, errors.New("admin password must be at least 8 characters")
 	}
-	if opt.NodeAddress == "" && opt.PeerAddress == "" && (opt.RelayToken == "" || opt.PeerSiteID == "") {
-		return nil, errors.New("give the address of one of the site's storage nodes, the address of a former peer, or a relay token and the peer's site ID")
+	if opt.NodeAddress == "" && opt.PeerAddress == "" && opt.RelayAddress == "" && opt.RelayToken == "" {
+		return nil, errors.New("give the address of one of the site's storage nodes, of a former peer, or of a relay your other sites use")
 	}
 	seed, err := keys.DecodePhrase(opt.Phrase)
 	if err != nil {
@@ -62,12 +68,17 @@ func Restore(ctx context.Context, cfg config.Config, opt RestoreOptions) (*Site,
 		return nil, err
 	}
 	// A relay lets the restored site reach peers without a direct address.
-	// It recognizes the site's key from before, so the token is enough.
+	// It lets the site in when it knows its key from before, or when a
+	// connected peer vouches for it. Its key needn't be known: the backup is
+	// checked end to end, so a wrong relay can only fail the restore.
 	var rc *relay.Client
-	if opt.RelayToken != "" {
-		t, err := relay.ParseToken(opt.RelayToken)
-		if err != nil {
-			return nil, err
+	calling := make(chan string, 16) // former peers that reach this site
+	if opt.RelayToken != "" || opt.RelayAddress != "" {
+		var t relay.Token
+		if opt.RelayToken != "" {
+			if t, err = relay.ParseToken(opt.RelayToken); err != nil {
+				return nil, err
+			}
 		}
 		if a := relayAddr(opt.RelayAddress); a != "" {
 			t.Address = a
@@ -75,7 +86,18 @@ func Restore(ctx context.Context, cfg config.Config, opt RestoreOptions) (*Site,
 		if t.Address == "" {
 			return nil, errors.New("the relay's address is required (host:7444)")
 		}
-		rc = &relay.Client{Token: t, Cert: cert, Name: "restore"}
+		if len(t.Key) == 0 {
+			if t.Key, err = relay.FetchKey(ctx, t.Address, cert); err != nil {
+				return nil, fmt.Errorf("can't restore through the relay, it can't be reached: %w", err)
+			}
+		}
+		rc = &relay.Client{Token: t, Cert: cert, OnIncoming: func(conn net.Conn, from string) {
+			conn.Close()
+			select {
+			case calling <- from:
+			default:
+			}
+		}}
 		rctx, cancel := context.WithCancel(ctx)
 		defer cancel()
 		go rc.Run(rctx)
@@ -83,7 +105,11 @@ func Restore(ctx context.Context, cfg config.Config, opt RestoreOptions) (*Site,
 			time.Sleep(200 * time.Millisecond)
 		}
 		if !rc.Connected() {
-			return nil, fmt.Errorf("cannot connect to relay %s: %s", t.Address, rc.Status().Error)
+			if e := rc.Status().Error; strings.Contains(e, "not registered") {
+				return nil, fmt.Errorf("can't restore through relay %s: none of your other sites is connected to it right now, "+
+					"and it doesn't know this site. Use a relay one of your other sites uses (under The Known Universe → Relays), or a former peer's address", t.Address)
+			}
+			return nil, fmt.Errorf("can't restore through relay %s: %s", t.Address, rc.Status().Error)
 		}
 	}
 	// via returns an HTTP client and base URL for a peer: direct when it has
@@ -116,7 +142,7 @@ func Restore(ctx context.Context, cfg config.Config, opt RestoreOptions) (*Site,
 		if err != nil {
 			return nil, fmt.Errorf("fetch metadata from node %s: %w", opt.NodeAddress, err)
 		}
-	} else {
+	} else if opt.PeerAddress != "" || opt.PeerSiteID != "" {
 		h, base := via(opt.PeerAddress, opt.PeerSiteID, nil, &seen)
 		source := opt.PeerAddress
 		if source == "" {
@@ -124,6 +150,32 @@ func Restore(ctx context.Context, cfg config.Config, opt RestoreOptions) (*Site,
 		}
 		if gen, blob, err = fetchBackup(ctx, h, base); err != nil {
 			return nil, fmt.Errorf("fetch backup from %s: %w", source, err)
+		}
+	} else {
+		// Ask the relay which of its sites vouch for this one. A relay
+		// before 1.5.0 can't tell; then wait for a former peer to call.
+		peers, _ := rc.Vouchers(ctx)
+		if len(peers) == 0 {
+			select {
+			case id := <-calling:
+				peers = []string{id}
+			case <-time.After(restoreWait):
+				return nil, errors.New("can't restore: none of your other sites reached this site through the relay. " +
+					"Check that one of them is online and uses this relay, or give a former peer's address")
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		var errs []string
+		for _, id := range peers {
+			h, base := via("", id, nil, &seen)
+			if gen, blob, err = fetchBackup(ctx, h, base); err == nil {
+				break
+			}
+			errs = append(errs, "site "+id[:min(8, len(id))]+": "+err.Error())
+		}
+		if blob == nil {
+			return nil, fmt.Errorf("can't restore: no backup from your other sites (%s)", strings.Join(errs, "; "))
 		}
 	}
 	raw, err := keys.Open(id.Master, blob, backupAAD(id.SiteID))
@@ -242,7 +294,8 @@ func Restore(ctx context.Context, cfg config.Config, opt RestoreOptions) (*Site,
 	if rc != nil {
 		t := rc.CurrentToken()
 		d.Exec(`INSERT INTO relays(id, address, pubkey, secret, added) VALUES(?, ?, ?, ?, ?)
-			ON CONFLICT(id) DO UPDATE SET address = excluded.address, secret = excluded.secret`,
+			ON CONFLICT(id) DO UPDATE SET address = excluded.address,
+				secret = CASE WHEN excluded.secret != '' THEN excluded.secret ELSE relays.secret END`,
 			relay.ID(t.Key), t.Address, []byte(t.Key), t.Secret, time.Now().Unix())
 	}
 	db.SetSetting(d, "admin_password", keys.HashPassword(opt.Password))

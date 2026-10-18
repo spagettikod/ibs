@@ -564,14 +564,16 @@ the new address set on it too.
 <details><summary><b>The whole site is lost</b></summary>
 
 1. Start an empty manager.
-2. Choose **Restore lost site → Peer via relay**. Enter the recovery phrase, your relay's
-   address and token, the site ID of a site you were connected to (shown on its
-   dashboard), and a new admin password. If you have no relay, use **Peer by address**
-   instead.
-3. The site's index comes back from that site, and your blocks are copied back from
-   other sites in the background. Files are readable right away.
+2. Choose **Restore lost site → Through a relay**. Enter the recovery phrase, the address
+   of a relay your other sites use (under **The Known Universe → Relays** on them) and a new
+   admin password. No relay token is needed: your other sites vouch for your site on the
+   relay. If you have no relay, use **Peer by address** instead.
+3. The site's index comes back from one of your other sites, and your blocks are copied
+   back from them in the background. Files are readable right away.
 
-Files that weren't copied to other sites yet are lost with the site.
+At least one of your other sites must be online. Files that weren't copied to other sites
+yet are lost with the site. With a relay older than 1.5.0, use one your site was
+registered with.
 
 </details>
 

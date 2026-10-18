@@ -2,6 +2,7 @@ package relay
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/tls"
 	"io"
 	"net"
@@ -197,4 +198,58 @@ func TestInviteCodeClaims(t *testing.T) {
 	if _, ok := s.takeCode("7"); ok {
 		t.Fatal("a code was taken twice")
 	}
+}
+
+// A site the relay has never seen gets in without the secret when a
+// connected peer vouches for it, and learns which sites vouch for it.
+func TestVouchedSiteRegisters(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	addr := freeAddr(t)
+	srv, err := New(t.TempDir(), addr, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go srv.Run(ctx, addr)
+	tok, _ := ParseToken(srv.Token())
+	tok.Address = addr
+
+	idA, certA := site(t)
+	idB, certB := site(t)
+	_, certC := site(t)
+
+	// B knows only the address; the key comes from the relay itself.
+	key, err := FetchKey(ctx, addr, certB)
+	if err != nil || !key.Equal(tok.Key) {
+		t.Fatalf("FetchKey = %x, %v", key, err)
+	}
+	bare := Token{Address: addr, Key: key}
+
+	// Without a voucher, B is refused.
+	b := &Client{Token: bare, Cert: certB}
+	bctx, bcancel := context.WithCancel(ctx)
+	go b.Run(bctx)
+	waitFor(t, "B to be refused", func() bool { return strings.Contains(b.Status().Error, "not registered") })
+	bcancel()
+
+	vouched := []ed25519.PublicKey{idB.Pub}
+	a := &Client{Token: tok, Cert: certA, Name: "a", Vouched: func() []ed25519.PublicKey { return vouched }}
+	go a.Run(ctx)
+	waitFor(t, "A to connect", a.Connected)
+
+	b = &Client{Token: bare, Cert: certB}
+	go b.Run(ctx)
+	waitFor(t, "vouched B to connect", b.Connected)
+	sites, err := b.Vouchers(ctx)
+	if err != nil || len(sites) != 1 || sites[0] != idA.SiteID {
+		t.Fatalf("Vouchers = %v, %v; want [%s]", sites, err, idA.SiteID)
+	}
+	if b.CurrentToken().Secret != tok.Secret {
+		t.Fatal("B did not get the relay's secret")
+	}
+
+	// C, which nobody vouches for, still needs the secret.
+	c := &Client{Token: bare, Cert: certC}
+	go c.Run(ctx)
+	waitFor(t, "C to be refused", func() bool { return strings.Contains(c.Status().Error, "not registered") })
 }

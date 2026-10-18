@@ -143,6 +143,7 @@ func (s *Site) runRelay(t relay.Token, added int64) *relay.Client {
 			s.relayed.push(&relayedConn{Conn: conn, from: from})
 		},
 		OnPunch: s.onPunch,
+		Vouched: s.peerKeys,
 		OnSecret: func(secret string) {
 			if _, err := s.DB.Exec(`UPDATE relays SET secret = ? WHERE id = ?`, secret, id); err != nil {
 				s.log.Warn("store new relay token", "relay", t.Address, "err", err)
@@ -168,6 +169,25 @@ func (s *Site) runRelay(t relay.Token, added int64) *relay.Client {
 	s.netMu.Unlock()
 	go rc.Run(rctx)
 	return rc
+}
+
+// peerKeys are the keys of this site's peers, which it vouches for on its
+// relays: a peer restored from its recovery phrase can then come back through
+// any of them.
+func (s *Site) peerKeys() []ed25519.PublicKey {
+	rows, err := s.DB.Query(`SELECT pubkey FROM peers WHERE length(pubkey) = ? ORDER BY site_id`, ed25519.PublicKeySize)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []ed25519.PublicKey
+	for rows.Next() {
+		var k []byte
+		if rows.Scan(&k) == nil {
+			out = append(out, k)
+		}
+	}
+	return out
 }
 
 func (s *Site) relayClient(id string) *relay.Client {

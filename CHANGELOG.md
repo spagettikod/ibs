@@ -3,6 +3,13 @@
 Each release says what to update and which launcher and relay it works with: IBS,
 the launcher and the relay are released separately.
 
+## Unreleased
+
+- **Restoring a lost site needs only the recovery phrase** and the address of a relay
+  your other sites use: no relay token and no site ID. Your other sites vouch for your
+  site on the relay (relay 1.5.0) and the restore finds them itself. With an older relay
+  it works if your site was registered with it.
+
 ## 1.8.2
 
 **What to update:** sites, under **Settings → Updates**; nodes follow.

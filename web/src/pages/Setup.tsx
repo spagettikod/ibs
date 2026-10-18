@@ -77,12 +77,10 @@ function CreateForm({ onCreated }: { onCreated: (phrase: string) => void }) {
 
 function RestoreForm({ onDone }: { onDone: () => void }) {
   const [phrase, setPhrase] = useState('')
-  const [via, setVia] = useState<'node' | 'relay' | 'address'>('node')
+  const [via, setVia] = useState<'node' | 'relay' | 'address'>('relay')
   const [nodeAddress, setNodeAddress] = useState('')
   const [peer, setPeer] = useState('')
-  const [relayToken, setRelayToken] = useState('')
   const [relayAddress, setRelayAddress] = useState('')
-  const [peerSiteId, setPeerSiteId] = useState('')
   const [address, setAddress] = useState('')
   const [pw, setPw] = useState('')
   const [error, setError] = useState<string>()
@@ -93,7 +91,7 @@ function RestoreForm({ onDone }: { onDone: () => void }) {
     setError(undefined)
     try {
       const source = via === 'node' ? { node_address: nodeAddress }
-        : via === 'relay' ? { relay_address: relayAddress, relay_token: relayToken, peer_site_id: peerSiteId }
+        : via === 'relay' ? { relay_address: relayAddress }
         : { peer_address: peer }
       await api('POST', '/api/setup/restore', { phrase, password: pw, peer_advertise: address, ...source })
       onDone()
@@ -103,7 +101,7 @@ function RestoreForm({ onDone }: { onDone: () => void }) {
       setBusy(false)
     }
   }
-  const sourceOK = via === 'node' ? !!nodeAddress : via === 'relay' ? !!relayToken && !!peerSiteId : !!peer
+  const sourceOK = via === 'node' ? !!nodeAddress : via === 'relay' ? !!relayAddress.trim() : !!peer
   return (
     <form onSubmit={submit} className="stack">
       <p className="muted">
@@ -116,9 +114,9 @@ function RestoreForm({ onDone }: { onDone: () => void }) {
         <textarea rows={3} value={phrase} onChange={(e) => setPhrase(e.target.value)} placeholder="XXXXX-XXXXX-…" className="mono" />
       </label>
       <div className="tabs">
-        <button type="button" className={via === 'node' ? 'active' : ''} onClick={() => setVia('node')}>Storage node</button>
-        <button type="button" className={via === 'relay' ? 'active' : ''} onClick={() => setVia('relay')}>Peer via relay</button>
+        <button type="button" className={via === 'relay' ? 'active' : ''} onClick={() => setVia('relay')}>Through a relay</button>
         <button type="button" className={via === 'address' ? 'active' : ''} onClick={() => setVia('address')}>Peer by address</button>
+        <button type="button" className={via === 'node' ? 'active' : ''} onClick={() => setVia('node')}>Storage node</button>
       </div>
       {via === 'node' && (
         <label>
@@ -128,22 +126,14 @@ function RestoreForm({ onDone }: { onDone: () => void }) {
         </label>
       )}
       {via === 'relay' ? (
-        <>
-          <label>
-            Relay address
-            <input className="mono" value={relayAddress} onChange={(e) => setRelayAddress(e.target.value)} placeholder="relay.example.com:7444" />
-          </label>
-          <label>
-            Relay token
-            <textarea rows={2} className="mono" value={relayToken} onChange={(e) => setRelayToken(e.target.value)} placeholder="ibsr2.…" />
-            <small className="muted">A relay this site used. It recognizes the site's key from before.</small>
-          </label>
-          <label>
-            Site ID of a former peer
-            <input className="mono" value={peerSiteId} onChange={(e) => setPeerSiteId(e.target.value.trim())} placeholder="32 hex characters" />
-            <small className="muted">Shown under the site name on that site's dashboard.</small>
-          </label>
-        </>
+        <label>
+          Address of a relay your other sites use
+          <input className="mono" value={relayAddress} onChange={(e) => setRelayAddress(e.target.value)} placeholder="relay.example.com:7444" />
+          <small className="muted">
+            Listed under The Known Universe → Relays on your other sites. They vouch for this site on the relay, so no
+            relay token is needed; at least one of them must be online.
+          </small>
+        </label>
       ) : via === 'address' && (
         <label>
           Address of a former peer
@@ -157,7 +147,7 @@ function RestoreForm({ onDone }: { onDone: () => void }) {
       <label>New admin password<input type="password" value={pw} onChange={(e) => setPw(e.target.value)} /><PasswordHint value={pw} /></label>
       <ErrorBox error={error} />
       <div className="stack">
-        <button className="btn primary" disabled={busy || !phrase || !sourceOK || pw.length < MIN_PASSWORD}>{busy ? 'Restoring…' : 'Restore site'}</button>
+        <button className="btn primary" disabled={busy || !phrase || !sourceOK || pw.length < MIN_PASSWORD}>{busy ? 'Restoring… this can take a minute' : 'Restore site'}</button>
         <StillNeeded items={[!phrase && 'the recovery phrase', !sourceOK && 'where to restore from',
           pw.length < MIN_PASSWORD && `a password of at least ${MIN_PASSWORD} characters`]} />
       </div>

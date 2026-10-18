@@ -4,6 +4,19 @@ The relay (`ghcr.io/spagettikod/ibs/relay`) is versioned separately from IBS and
 released when it changes. Before 1.2.0, its changes are in the IBS changelog. Each
 release says which IBS versions it works with.
 
+## 1.5.0
+
+**What to update:** relays, by pulling the new image (keep `/data`). Needed to restore a
+lost site with only its recovery phrase and the relay's address.
+
+**Works with:** every IBS 1.x site; restoring without a relay token needs IBS 1.8.3 or
+newer.
+
+- **Sites vouch for their peers:** a site the relay doesn't know gets in without the
+  token when one of its former peers is connected and vouches for it, and learns which
+  ones do. So a lost site can be restored through any relay its peers use, also one set
+  up after it was lost or one that lost its data.
+
 ## 1.4.0
 
 **What to update:** relays, by pulling the new image (keep `/data`). Needed for short
