@@ -93,10 +93,11 @@ def rim_text(text, r=36.3, size=7, spacing=1.1):
 
 
 def patch():
-    """The full patch: white edge, the name around the rim, the window."""
-    return (f'<circle cx="50" cy="50" r="48" fill="{WHITE}"/><circle cx="50" cy="50" r="45.5" fill="{NAVY}"/>'
+    """The full patch: a thin white edge (1.5), the name around the rim, the
+    window with a thin white ring (1.2)."""
+    return (f'<circle cx="50" cy="50" r="48" fill="{WHITE}"/><circle cx="50" cy="50" r="46.5" fill="{NAVY}"/>'
             + rim_text("INTERGALACTIC BACKUP SYSTEM")
-            + scene(31) + f'<circle cx="50" cy="50" r="31" fill="none" stroke="{WHITE}" stroke-width="2"/>')
+            + scene(31) + f'<circle cx="50" cy="50" r="31" fill="none" stroke="{WHITE}" stroke-width="1.2"/>')
 
 
 def badge(small=False):
