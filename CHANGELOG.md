@@ -3,7 +3,13 @@
 Each release says what to update and which launcher and relay it works with: IBS,
 the launcher and the relay are released separately.
 
-## Unreleased
+## 1.8.3
+
+**What to update:** the relay to 1.5.0 first (pull the new image, keep `/data`), then
+sites under **Settings → Updates**; nodes follow.
+
+**Works with:** launcher 1.0.0 or newer (1.1.0 recommended), relay 1.2.0 or newer (1.5.0
+to restore through a relay that doesn't know the lost site).
 
 - **Restoring a lost site needs only the recovery phrase** and the address of a relay
   your other sites use: no relay token and no site ID. Your other sites vouch for your
