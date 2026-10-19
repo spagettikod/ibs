@@ -29,7 +29,7 @@ import (
 //
 // Through a relay, the joining site needs no relay token: the inviting site
 // claims a name on each of its relays, made from the secret, and the relay
-// puts the joining site through to it once (like a short code). Addresses
+// puts the joining site through to it once. Addresses
 // leave out their default ports.
 const longInvitePrefix = "ibs3."
 
@@ -258,4 +258,45 @@ func (s *Site) JoinWithLongInvite(ctx context.Context, token string) (*PeerInfo,
 		return nil, errors.New("the inviting site sent an invite that isn't its own")
 	}
 	return s.JoinWithInvite(ctx, full)
+}
+
+// reclaimInvites claims this site's open invites again on a relay that
+// (re)connected, e.g. after the relay restarted and forgot them. Rows with
+// relay_id '*' are claimed on every relay.
+func (s *Site) reclaimInvites(rc *relay.Client) {
+	rows, err := s.DB.Query(`SELECT number, expires FROM invite_codes WHERE relay_id IN (?, '*') AND used = 0 AND expires > ?`, rc.ID(), time.Now().Unix())
+	if err != nil {
+		return
+	}
+	type claim struct {
+		name    string
+		expires int64
+	}
+	var claims []claim
+	for rows.Next() {
+		var c claim
+		rows.Scan(&c.name, &c.expires)
+		claims = append(claims, c)
+	}
+	rows.Close()
+	for _, c := range claims {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := rc.ClaimCode(ctx, c.name, time.Unix(c.expires, 0)); err != nil {
+			s.log.Warn("claim invite again", "relay", rc.Token.Address, "err", err)
+		}
+		cancel()
+	}
+}
+
+// Join joins the IBS with an invite: the long form, or the full one that
+// sites before 1.8.5 hand out.
+func (s *Site) Join(ctx context.Context, text string) (*PeerInfo, error) {
+	t := strings.Join(strings.Fields(text), "")
+	switch {
+	case strings.HasPrefix(t, longInvitePrefix):
+		return s.JoinWithLongInvite(ctx, t)
+	case strings.HasPrefix(t, invitePrefix):
+		return s.JoinWithInvite(ctx, t)
+	}
+	return nil, errors.New("not an invite: it starts with ibs3. (or ibs2. from sites before 1.8.5)")
 }

@@ -333,3 +333,13 @@ export function useSubmit(action: () => Promise<void>) {
   }
   return { busy, error, submit }
 }
+
+/**
+ * After a restore: how the site's own files come back from the copies on
+ * other sites, "Restoring from other sites: 21.6 GB left · 9 MB/s · about 40 min".
+ */
+export function restoreProgress(left: number, bps: number, othersOnline: boolean): string {
+  if (left <= 0) return ''
+  if (bps > 0) return `Restoring from other sites: ${fmtBytes(left)} left · ${fmtSpeed(bps)} · about ${fmtDuration(left / bps)}`
+  return `Restoring from other sites: ${fmtBytes(left)} left${othersOnline ? '' : ', waiting for another site to come online'}`
+}

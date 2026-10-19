@@ -1,13 +1,17 @@
 import { FormEvent, useState } from 'react'
-import { api, NodeInfo } from '../api'
+import { api, Dashboard, NodeInfo } from '../api'
 
 type JoinToken = { token: string; address: string; configured_address: string }
-import { ago, ask, Card, Copy, Counted, ErrorBox, fmtBytes, Meter, Modal, Status, tell, useLoader, useTick, Version } from '../ui'
+import { ago, ask, Card, Copy, Counted, ErrorBox, fmtBytes, Meter, Modal, restoreProgress, Spinner, Status, tell, useLoader, useTick, Version } from '../ui'
 
 export default function NodesPage() {
   const { data, error, reload } = useLoader(() => api<NodeInfo[]>('GET', '/api/nodes'), ['nodes', 'replication', 'data'])
   useTick(5000)
   const token = useLoader(() => api<JoinToken>('GET', '/api/nodes/join-token'))
+  // After a restore: the site's own blocks coming back to its nodes.
+  const dash = useLoader(() => api<Dashboard>('GET', '/api/dashboard'), ['replication', 'nodes'])
+  const d = dash.data
+  const restoring = d ? restoreProgress(d.replication.missing_bytes, d.restore_bps, (d.peers ?? []).some((p) => p.online)) : ''
   const [editing, setEditing] = useState<NodeInfo>()
 
   const rotate = async () => {
@@ -91,6 +95,9 @@ export default function NodesPage() {
         )}
       </details>
       <ErrorBox error={error} />
+      {restoring && (
+        <div className="notice"><Spinner title="Restoring from other sites" /> {restoring}. The blocks go to the nodes with the most room.</div>
+      )}
       <Card>
         <table>
           <thead><tr><th>Node</th><th>Status</th><th>Version</th><th>Address</th><th>Blocks</th><th>Storage for IBS</th><th>Shared</th><th>Metadata copy</th><th /></tr></thead>

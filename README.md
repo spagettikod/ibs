@@ -82,8 +82,8 @@ IBS runs in Docker. Choose your case; the ports each machine needs are under
 2. Open `http://<host>:8080`, choose **Create new site**, and pick a name and an admin
    password. **Write down the recovery phrase.** It's shown only once.
 
-3. **The Known Universe → Join a site:** enter the invite code, like
-   `relay.example.com 7-comet-harbor-violet` (or paste a long invite). Your site connects to every site in
+3. **The Known Universe → Join a site:** paste the invite (`ibs3.…`) you got from a site
+   in the IBS. Your site connects to every site in
    the IBS, through their relays. That's it.
 
 </details>
@@ -382,9 +382,8 @@ Environment variables. All are optional.
 - **Only invited sites get in.** A site joins the IBS with an invite from a site
   already in it; the others then accept it because a site they trust vouches for it.
   So anyone running a site in your IBS can bring in new sites. Sites can't throw each
-  other out; a site can only leave by itself. An invite code works once and for a day;
-  a wrong guess makes it stop working, and the relay that passes it on can't read or
-  use it.
+  other out; a site can only leave by itself. An invite works once and for a day,
+  and the relays that pass it on can't read or use it.
 
 ## Disk space
 

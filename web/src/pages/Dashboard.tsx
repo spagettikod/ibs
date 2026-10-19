@@ -1,7 +1,7 @@
 import { api, Dashboard, ScrubInfo, TLSStatus, UpdatesInfo } from '../api'
 import { NetworkView, useNetworkView, ViewSwitch } from '../GeoMap'
 import { ratesOf } from '../NetworkGraph'
-import { ago, Card, ErrorBox, fmtBytes, fmtDuration, fmtSpeed, Meter, Spinner, Stat, uptime, useLoader, useTick } from '../ui'
+import { ago, Card, ErrorBox, fmtBytes, fmtDuration, fmtSpeed, Meter, restoreProgress, Spinner, Stat, uptime, useLoader, useTick } from '../ui'
 import { scrubEta, scrubPercent, scrubResult } from './Scrub'
 
 type Item = { level: 'bad' | 'warn' | 'info'; text: string; href: string; link: string }
@@ -132,9 +132,7 @@ export default function DashboardPage() {
   const busy = act?.writing && act?.deleting ? 'Files arriving and being deleted…'
     : act?.writing ? 'Files arriving…' : act?.deleting ? 'Files being deleted…' : ''
   // After a restore: your files' blocks coming back from the copies on other sites.
-  const restoreNote = restoring > 0 && (data.restore_bps > 0
-    ? <>Restoring from other sites: {fmtBytes(restoring)} left · {fmtSpeed(data.restore_bps)} · about {fmtDuration(restoring / data.restore_bps)}</>
-    : <>Restoring from other sites: {fmtBytes(restoring)} left{(data.peers ?? []).some((p) => p.online) ? '' : ', waiting for another site to come online'}</>)
+  const restoreNote = restoreProgress(restoring, data.restore_bps, (data.peers ?? []).some((p) => p.online))
   // Copies per file on other sites: wanted, and what the online sites allow.
   const want = data.ibs_capacity.copies
   const have = Math.min(data.ibs_capacity.sites, want)

@@ -137,15 +137,11 @@ func (s *Site) runRelay(t relay.Token, added int64) *relay.Client {
 		Token: t, Cert: cert, Name: s.Name(), Local: s.localEndpoints,
 		OnIncoming: func(conn net.Conn, from string) {
 			if n, ok := strings.CutPrefix(from, "code:"); ok {
-				if strings.HasPrefix(n, "i") {
-					// A site joining with a long invite: it fetches the full
-					// invite from the peer server. The relay put it through
-					// once; claim the name again until the invite is used.
-					s.relayed.push(&relayedConn{Conn: conn, from: from})
-					go s.reclaimInvite(s.relayClient(id), n)
-					return
-				}
-				go s.answerCode(conn, n) // a site joining with an invite code
+				// A site joining with an invite: it fetches the full invite
+				// from the peer server. The relay put it through once; claim
+				// the name again until the invite is used.
+				s.relayed.push(&relayedConn{Conn: conn, from: from})
+				go s.reclaimInvite(s.relayClient(id), n)
 				return
 			}
 			s.relayed.push(&relayedConn{Conn: conn, from: from})
@@ -160,7 +156,7 @@ func (s *Site) runRelay(t relay.Token, added int64) *relay.Client {
 			s.log.Info("relay token changed", "relay", t.Address)
 		},
 	}
-	rc.OnConnect = func() { s.reclaimCodes(rc) }
+	rc.OnConnect = func() { s.reclaimInvites(rc) }
 	s.netMu.Lock()
 	if s.quicTr != nil {
 		rc.UDP = s.quicTr

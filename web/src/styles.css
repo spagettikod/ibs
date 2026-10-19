@@ -354,7 +354,6 @@ label.check input { width: auto; margin-top: 3px; }
 .key-cell { word-break: break-all; max-width: 360px; }
 .shared-cell { min-width: 110px; }
 .shared-cell .meter { margin: 4px 0 2px; }
-.invite-code { font-size: 18px; font-weight: 600; padding: 14px 16px; border-radius: 10px; border: 1px solid var(--border); background: var(--panel); user-select: all; word-break: break-all; }
 
 /* Release notes dialog */
 .release-notes { display: flex; flex-direction: column; gap: 8px; line-height: 1.5; max-height: 60vh; overflow-y: auto; }

@@ -3,7 +3,6 @@ module ibs
 go 1.26.3
 
 require (
-	filippo.io/cpace v0.0.0-20210101143347-24d601e2e469
 	github.com/go-acme/lego/v4 v4.35.2
 	github.com/quic-go/quic-go v0.63.0
 	modernc.org/sqlite v1.60.1
@@ -39,7 +38,6 @@ require (
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
 	github.com/google/go-querystring v1.2.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/gtank/ristretto255 v0.1.2 // indirect
 	github.com/hashicorp/errwrap v1.0.0 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect

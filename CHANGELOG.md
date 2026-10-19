@@ -3,6 +3,15 @@
 Each release says what to update and which launcher and relay it works with: IBS,
 the launcher and the relay are released separately.
 
+## Unreleased
+
+### New
+
+- **Nodes** shows the files coming back after a restore: how much is left, the speed and
+  about how long.
+- **Short invite codes are gone:** sites invite with the invite alone, now short enough
+  to paste anywhere.
+
 ## 1.8.5
 
 **What to update:** the relay to 1.6.0 first (pull the new image, keep `/data`), then

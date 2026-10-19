@@ -174,14 +174,7 @@ func (s *Server) routes() {
 		if err != nil {
 			return badRequest(err.Error())
 		}
-		out := map[string]string{"token": t}
-		// The short code too, when a relay of this site supports it.
-		if code, err := st.CreateInviteCode(r.Context()); err == nil {
-			out["code"] = code
-		} else {
-			out["code_error"] = err.Error()
-		}
-		return writeJSON(w, out)
+		return writeJSON(w, map[string]string{"token": t})
 	}))
 	m.HandleFunc("POST /api/peers/join", a(func(w http.ResponseWriter, r *http.Request, st *site.Site) error {
 		var req struct {
