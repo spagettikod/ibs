@@ -145,7 +145,7 @@ export type VersionInfo = {
 export type SeenVersion = { version: string; sites: string[]; trusted: boolean; error?: string }
 export type ReleaseKey = { id: string; name: string; key: string; default: boolean; env: boolean; signed: string[] }
 export type UpdatesInfo = {
-  running: string; launcher: boolean; launcher_version?: string; github: boolean; betas: boolean; auto_install: boolean; check_minutes: number; github_checked?: number; github_error?: string
+  running: string; launcher: boolean; launcher_version?: string; github: boolean; betas: boolean; auto_install: boolean; check_minutes: number; github_checked?: number; github_error?: string; github_retry?: number
   versions: VersionInfo[]; seen: SeenVersion[]; keys: ReleaseKey[]; newer: string
   old: { remove: string[]; keep?: string; fallback?: string } // what Remove old versions does
 }

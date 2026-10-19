@@ -2,11 +2,16 @@ package site
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"net/http"
+	"net/http/httptest"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"ibs/internal/db"
 	"ibs/internal/release"
@@ -109,5 +114,34 @@ func TestRemoveOldVersions(t *testing.T) {
 	}
 	if p := s.Updates().Old; len(p.Remove) != 0 || p.Keep != "0.9.2" {
 		t.Fatalf("nothing more to remove, got %+v", p)
+	}
+}
+
+// When GitHub's limit is used up, the site says until when and doesn't ask
+// again before then; when it last asked is kept across restarts.
+func TestGitHubRateLimit(t *testing.T) {
+	s := newTestSite(t)
+	asked := 0
+	reset := time.Now().Add(10 * time.Minute).Unix()
+	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		asked++
+		w.Header().Set("X-RateLimit-Remaining", "0")
+		w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(reset, 10))
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer gh.Close()
+	t.Setenv("IBS_RELEASES_URL", gh.URL)
+	ctx := context.Background()
+	s.CheckGitHubNow(ctx)
+	u := s.Updates()
+	if u.GitHubRetry != reset || !strings.Contains(u.GitHubError, "60 checks an hour") {
+		t.Fatalf("retry %d (want %d), error %q", u.GitHubRetry, reset, u.GitHubError)
+	}
+	s.CheckGitHubNow(ctx)
+	if asked != 1 {
+		t.Fatalf("asked GitHub %d times while its limit is used up", asked)
+	}
+	if s.SettingInt("github_checked") == 0 {
+		t.Fatal("the time of the last check isn't kept")
 	}
 }

@@ -10,6 +10,7 @@ x-site: &site
     IBS_ADMIN_PASSWORD: changeme123
     IBS_STORAGE_LIMIT: 200M
     IBS_CHECK_INTERVAL: 2s
+    IBS_RELEASES_URL: http://127.0.0.1:9/releases # never GitHub: tests would use up its limit
   networks: [net]
 
 services:
@@ -50,7 +51,7 @@ services:
   site-b-new: # an empty site where site-b is restored
     image: ibs
     profiles: [restore]
-    environment: { IBS_STORAGE_LIMIT: 200M, IBS_CHECK_INTERVAL: 2s }
+    environment: { IBS_STORAGE_LIMIT: 200M, IBS_CHECK_INTERVAL: 2s, IBS_RELEASES_URL: "http://127.0.0.1:9/releases" }
     networks: [net]
   ctl:
     image: curlimages/curl:8.10.1

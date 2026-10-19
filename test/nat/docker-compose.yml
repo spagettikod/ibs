@@ -34,6 +34,7 @@ x-site: &site
   entrypoint: ["sh", "-c", "ip route replace default via $$GW && exec docker-entrypoint.sh"]
   environment: &siteenv
     IBS_ADMIN_PASSWORD: changeme123
+    IBS_RELEASES_URL: http://127.0.0.1:9/releases # never GitHub: tests would use up its limit
     IBS_RELAY_ADDRESS: 172.31.0.10:7444
     IBS_RELAY_TOKEN_FILE: /relay/token
     IBS_CHECK_INTERVAL: 2s

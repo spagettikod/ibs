@@ -34,7 +34,7 @@ start_tls_site() { # name [extra docker args...]
   local name=$1; shift
   docker run -d --name "$name" --network "$NET" -p 127.0.0.1::8080 -p 127.0.0.1::9000 \
     -v "$WORK:/hook:ro" -v "$ID-data:/data" \
-    -e IBS_SITE_NAME=tls -e IBS_ADMIN_PASSWORD=test-password -e IBS_STORAGE_LIMIT=200M \
+    -e IBS_SITE_NAME=tls -e IBS_ADMIN_PASSWORD=test-password -e IBS_RELEASES_URL=http://127.0.0.1:9/releases -e IBS_STORAGE_LIMIT=200M \
     -e IBS_TLS_DOMAINS=ibs.test,s3.ibs.test -e IBS_TLS_DNS_PROVIDER=exec -e EXEC_PATH=/hook/dns-hook.sh \
     -e IBS_TLS_CA=https://pebble:14000/dir -e LEGO_CA_CERTIFICATES=/hook/pebble-api.pem \
     -e IBS_TLS_DNS_PROPAGATION_WAIT=2s "$@" ibs >/dev/null

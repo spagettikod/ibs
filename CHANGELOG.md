@@ -3,6 +3,14 @@
 Each release says what to update and which launcher and relay it works with: IBS,
 the launcher and the relay are released separately.
 
+## Unreleased
+
+### Fixed
+
+- **"403 Forbidden" when checking GitHub:** GitHub allows 60 checks an hour from your
+  network, and each site start used one. Sites now remember when they last checked, and
+  when the limit is used up they say until when and wait for it.
+
 ## 1.8.6
 
 **What to update:** sites, under **Settings → Updates**; nodes follow.

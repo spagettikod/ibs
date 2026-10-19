@@ -70,6 +70,7 @@ type ReleaseRef struct {
 type updateState struct {
 	mu            sync.Mutex
 	githubChecked time.Time
+	githubRetry   time.Time // GitHub's limit is used up until then
 	githubError   string
 	githubLatest  string
 	fetchRun      sync.Mutex        // one fetchReleases at a time
@@ -134,7 +135,7 @@ func (s *Site) SetBetas(on bool) {
 	}
 	db.SetSetting(s.DB, "updates_betas", v)
 	if on && s.GitHubChecks() {
-		go s.checkGitHub(context.Background())
+		go s.CheckGitHubNow(context.Background())
 	}
 }
 
@@ -242,6 +243,7 @@ type UpdatesInfo struct {
 	GitHubChecked   int64         `json:"github_checked,omitempty"`
 	Old             OldVersions   `json:"old"`
 	GitHubError     string        `json:"github_error,omitempty"`
+	GitHubRetry     int64         `json:"github_retry,omitempty"` // GitHub's limit is used up until then
 	Versions        []VersionInfo `json:"versions"`
 	Seen            []SeenVersion `json:"seen"`
 	Keys            []KeyInfo     `json:"keys"`
@@ -265,6 +267,9 @@ func (s *Site) Updates() UpdatesInfo {
 		info.GitHubChecked = s.updates.githubChecked.Unix()
 	}
 	info.GitHubError = s.updates.githubError
+	if time.Now().Before(s.updates.githubRetry) {
+		info.GitHubRetry = s.updates.githubRetry.Unix()
+	}
 	s.updates.mu.Unlock()
 
 	running := map[string][]string{} // version -> sites running it
@@ -382,7 +387,7 @@ func (s *Site) SetGitHubChecks(on bool) {
 	}
 	db.SetSetting(s.DB, "updates_github", v)
 	if on {
-		go s.checkGitHub(context.Background())
+		go s.CheckGitHubNow(context.Background())
 	}
 }
 
@@ -575,13 +580,8 @@ func (s *Site) fetchReleases(ctx context.Context) {
 		s.log.Info("fetched new version from another site", "version", r.Version, "site", pr.site[:8])
 		newest = r.Version
 	}
-	if s.GitHubChecks() {
-		s.updates.mu.Lock()
-		due := time.Since(s.updates.githubChecked) > s.CheckInterval()
-		s.updates.mu.Unlock()
-		if due {
-			s.checkGitHub(ctx)
-		}
+	if s.GitHubChecks() && s.githubDue() {
+		s.checkGitHub(ctx)
 	}
 	s.autoInstall()
 }
@@ -658,11 +658,30 @@ func (s *Site) endFetch(v string, err error) {
 }
 
 // releasesURL is where the latest release is announced (overridable for tests).
-// CheckGitHubNow checks GitHub right away (the Updates page's "Check now").
+// CheckGitHubNow checks GitHub right away (the Updates page's "Check now"),
+// unless GitHub's limit is used up.
 func (s *Site) CheckGitHubNow(ctx context.Context) {
-	if s.GitHubChecks() {
+	s.updates.mu.Lock()
+	limited := time.Now().Before(s.updates.githubRetry)
+	s.updates.mu.Unlock()
+	if s.GitHubChecks() && !limited {
 		s.checkGitHub(ctx)
 	}
+}
+
+// githubDue reports whether it's time to look at GitHub again: the check
+// interval has passed since the last look, which is remembered across
+// restarts (each restart would use up some of GitHub's limit), and GitHub's
+// limit isn't used up.
+func (s *Site) githubDue() bool {
+	s.updates.mu.Lock()
+	defer s.updates.mu.Unlock()
+	if s.updates.githubChecked.IsZero() {
+		if at := s.SettingInt("github_checked"); at > 0 {
+			s.updates.githubChecked = time.Unix(at, 0)
+		}
+	}
+	return time.Since(s.updates.githubChecked) > s.CheckInterval() && time.Now().After(s.updates.githubRetry)
 }
 
 // checkGitHub looks at the latest release on GitHub and downloads it when it
@@ -721,9 +740,16 @@ func (s *Site) checkGitHub(ctx context.Context) {
 	s.updates.githubError = ""
 	if err != nil {
 		s.updates.githubError = err.Error()
-		s.log.Warn("check GitHub for releases", "err", err)
+		var rl *rateLimited
+		if errors.As(err, &rl) {
+			s.updates.githubRetry = rl.until
+			s.log.Warn("can't check GitHub for new versions until its limit resets", "until", rl.until.Format(time.RFC3339), "err", err)
+		} else {
+			s.log.Warn("check GitHub for releases", "err", err)
+		}
 	}
 	s.updates.mu.Unlock()
+	db.SetSetting(s.DB, "github_checked", strconv.FormatInt(time.Now().Unix(), 10))
 	s.notify(TopicPeers)
 }
 
@@ -738,9 +764,27 @@ func httpGet(ctx context.Context, url string) (*http.Response, error) {
 	}
 	if resp.StatusCode != http.StatusOK {
 		resp.Body.Close()
+		if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests {
+			if resp.Header.Get("X-RateLimit-Remaining") == "0" {
+				reset, _ := strconv.ParseInt(resp.Header.Get("X-RateLimit-Reset"), 10, 64)
+				until := time.Unix(reset, 0)
+				if reset == 0 {
+					until = time.Now().Add(time.Hour)
+				}
+				return nil, &rateLimited{until}
+			}
+		}
 		return nil, fmt.Errorf("%s: %s", url, resp.Status)
 	}
 	return resp, nil
+}
+
+// rateLimited: GitHub allows 60 requests an hour from one network address
+// without signing in, and they're used up until then.
+type rateLimited struct{ until time.Time }
+
+func (e *rateLimited) Error() string {
+	return "GitHub allows 60 checks an hour from your network (all computers on it together), and they're used up"
 }
 
 // nodeTarget is the version a storage node should run: the manager's, given

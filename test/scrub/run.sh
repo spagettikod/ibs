@@ -24,7 +24,7 @@ docker network create $NET >/dev/null
 site() { # name alias [docker args...]
   local name=$1 alias=$2; shift 2
   docker run -d --name $name --network $NET --network-alias $alias -p 127.0.0.1::8080 \
-    -e IBS_SITE_NAME=$alias -e IBS_ADMIN_PASSWORD=test-password -e IBS_STORAGE_LIMIT=200M -e IBS_CHECK_INTERVAL=2s \
+    -e IBS_SITE_NAME=$alias -e IBS_ADMIN_PASSWORD=test-password -e IBS_RELEASES_URL=http://127.0.0.1:9/releases -e IBS_STORAGE_LIMIT=200M -e IBS_CHECK_INTERVAL=2s \
     -e IBS_PEER_ADVERTISE=$alias:7443 "$@" ibs >/dev/null
 }
 site $ID-a site-a -e IBS_SCRUB_RATE=2M # slow enough for a site to come back during its scrub

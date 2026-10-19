@@ -183,7 +183,11 @@ export default function UpdatesSection() {
               </select>
             </label>
           )}
-          {data.github && data.github_error && <div className="small warn-text">Last check failed: {data.github_error}</div>}
+          {data.github && data.github_retry
+            ? <div className="small warn-text">
+                Can't check GitHub for new versions until {new Date(data.github_retry * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}: {data.github_error}. Your other sites still pass new versions on.
+              </div>
+            : data.github && data.github_error && <div className="small warn-text">Last check failed: {data.github_error}</div>}
           <label className="check">
             <input type="checkbox" checked={data.betas} onChange={(e) => act(() => api('PUT', '/api/updates/settings', { betas: e.target.checked }))} />
             <span>
@@ -206,7 +210,8 @@ export default function UpdatesSection() {
           </label>
           {data.github && (
             <div className="row">
-              <button className="btn small" disabled={checking} onClick={checkNow}>{checking ? 'Checking…' : 'Check now'}</button>
+              <button className="btn small" disabled={checking || !!data.github_retry} title={data.github_retry ? "GitHub's limit is used up" : undefined}
+                onClick={checkNow}>{checking ? 'Checking…' : 'Check now'}</button>
               <span className="muted small">
                 {checking ? 'Asking GitHub…'
                   : data.github_checked ? `Last checked ${Date.now() / 1000 - data.github_checked < 10 ? 'just now' : ago(data.github_checked)}.${checked ? ' ' + checked : ''}`

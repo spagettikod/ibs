@@ -17,7 +17,7 @@ FAILED=()
 start_site() {
   SITE=ibs-test-$$
   docker run -d --name "$SITE" -p 127.0.0.1::8080 -p 127.0.0.1::9000 \
-    -e IBS_SITE_NAME=test -e IBS_ADMIN_PASSWORD=test-password \
+    -e IBS_SITE_NAME=test -e IBS_ADMIN_PASSWORD=test-password -e IBS_RELEASES_URL=http://127.0.0.1:9/releases \
     -e IBS_STORAGE_LIMIT="${STORAGE_LIMIT:-200M}" ibs >/dev/null || exit 1
   trap 'docker rm -fv "$SITE" >/dev/null 2>&1; rm -rf "$WORK"' EXIT
   IBS_WEB=http://$(docker port "$SITE" 8080/tcp | head -1)
