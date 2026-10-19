@@ -136,5 +136,7 @@ check "and site-b sees site-a"                  wait_for 60 peer_of site-b-new s
 check "its bucket is back"                      bash -c "$(declare -f api dc); api site-b-new GET /api/buckets | grep -q '\"mesh\"'"
 get() { dc exec -T ctl sh -c "curl -sf -b /tmp/jar-site-b-new 'http://site-b-new:8080/api/buckets/mesh/download?key=data.bin' | cmp -s - /tmp/data.bin"; }
 check "and its file, from the copy on site-a"   wait_for 120 get
+back() { api site-b-new GET /api/dashboard | grep -q '"missing_locally":0,"missing_bytes":0'; }
+check "nothing is left to fetch back"          wait_for 120 back
 
 finish

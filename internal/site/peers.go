@@ -558,6 +558,8 @@ type PeerInfo struct {
 	// Copy traffic right now, bytes per second: our copies to it, its copies to us.
 	OutBps float64 `json:"out_bps"`
 	InBps  float64 `json:"in_bps"`
+	// RestoreBps: this site's own blocks coming back from it, after a restore.
+	RestoreBps float64 `json:"restore_bps"`
 }
 
 func (s *Site) Peers() ([]PeerInfo, error) {
@@ -582,6 +584,7 @@ func (s *Site) Peers() ([]PeerInfo, error) {
 		json.Unmarshal([]byte(routesJSON), &rt)
 		p.Relays = len(rt.Relays)
 		p.OutBps, p.InBps = s.copyRates(p.SiteID)
+		p.RestoreBps = s.restoreRate(p.SiteID)
 		if st != nil {
 			c := st.Peers[p.SiteID]
 			p.Counted, p.ReplicasOut, p.BytesOut, p.Removing, p.HeldBlocks, p.HeldBytes = true, c.ReplicasOut, c.BytesOut, c.Removing, c.HeldBlocks, c.HeldBytes

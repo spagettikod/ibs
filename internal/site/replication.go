@@ -384,12 +384,14 @@ func (s *Site) healOnce(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		ct, _, err := s.fetchFromReplicas(ctx, m.id)
+		ct, from, err := s.fetchFromReplicas(ctx, m.id)
 		if err != nil {
 			continue
 		}
 		if err := s.healBlock(ctx, m.id, ct, m.from); err == nil {
 			healed++
+			s.restoring.add(int64(len(ct)))
+			s.peerRates(from).back.add(int64(len(ct)))
 		} else if errors.Is(err, ErrNoSpace) {
 			s.log.Warn("no room on any node to restore blocks; they are served from replicas")
 			break
@@ -675,6 +677,7 @@ type ReplicationHealth struct {
 	OverReplicated  int64 `json:"over_replicated"`
 	PendingBytes    int64 `json:"pending_bytes"` // replica bytes still to be copied
 	MissingLocally  int64 `json:"missing_locally"`
+	MissingBytes    int64 `json:"missing_bytes"` // of those: still to be fetched back to this site
 	PendingDeletes  int64 `json:"pending_deletes"`
 	// NoRoom: blocks that need a copy no site has room for, at the last try.
 	NoRoom int64 `json:"no_room"`
@@ -720,6 +723,7 @@ func (s *Site) blockFigures() (ReplicationHealth, []blockGroup) {
 				COALESCE(n.counted, 0) AS c, COALESCE(n.online, 0) AS o, COALESCE(n.any, 0) AS a
 			FROM blocks b JOIN buckets bk ON bk.name = b.bucket LEFT JOIN n ON n.block_id = b.id WHERE b.refs > 0)
 		SELECT bucket, node_id, COUNT(*), COALESCE(SUM(size), 0), COUNT(CASE WHEN node_id = '' THEN 1 END),
+			COALESCE(SUM(CASE WHEN node_id = '' THEN size END), 0),
 			COUNT(CASE WHEN c < repl THEN 1 END), COALESCE(SUM(CASE WHEN c < repl THEN (repl - c) * size END), 0),
 			COUNT(CASE WHEN o > repl THEN 1 END),
 			COALESCE(SUM(min(c, want)), 0), COALESCE(SUM(want), 0), COUNT(CASE WHEN c < want THEN 1 END),
@@ -734,8 +738,8 @@ func (s *Site) blockFigures() (ReplicationHealth, []blockGroup) {
 	var groups []blockGroup
 	for rows.Next() {
 		var g blockGroup
-		var missing, pendingBytes, over, made, possible, copying, copyingBytes, noCopy, someCopies int64
-		if rows.Scan(&g.bucket, &g.node, &g.blocks, &g.bytes, &missing, &g.under, &pendingBytes, &over,
+		var missing, missingBytes, pendingBytes, over, made, possible, copying, copyingBytes, noCopy, someCopies int64
+		if rows.Scan(&g.bucket, &g.node, &g.blocks, &g.bytes, &missing, &missingBytes, &g.under, &pendingBytes, &over,
 			&made, &possible, &copying, &copyingBytes, &noCopy, &someCopies, &g.stranded) != nil {
 			continue
 		}
@@ -743,6 +747,7 @@ func (s *Site) blockFigures() (ReplicationHealth, []blockGroup) {
 		h.Blocks += g.blocks
 		h.Bytes += g.bytes
 		h.MissingLocally += missing
+		h.MissingBytes += missingBytes
 		h.UnderReplicated += g.under
 		h.PendingBytes += pendingBytes
 		h.OverReplicated += over

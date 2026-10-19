@@ -290,7 +290,8 @@ type Dashboard struct {
 	// Counted: the figures from the cache are in; false right after a start,
 	// before the first calculation.
 	Counted     bool              `json:"counted"`
-	Activity    Activity          `json:"activity"` // files arriving or being deleted now
+	Activity    Activity          `json:"activity"`    // files arriving or being deleted now
+	RestoreBps  float64           `json:"restore_bps"` // blocks fetched back from other sites, bytes/s
 	Replication ReplicationHealth `json:"replication"`
 	Capacity    IBSCapacity       `json:"ibs_capacity"`
 	Nodes       []NodeInfo        `json:"nodes"`
@@ -315,6 +316,7 @@ func (s *Site) Dashboard() (*Dashboard, error) {
 	d.Site.Location = s.Location()
 	s.DB.QueryRow(`SELECT COUNT(*) FROM buckets`).Scan(&d.Site.Buckets)
 	d.Activity = s.Activity()
+	d.RestoreBps = s.restoring.bps()
 	// The expensive figures come from the cache (stats.go).
 	if st := s.stats(); st != nil {
 		d.Counted = true
@@ -394,6 +396,10 @@ func (s *Site) StorableCapacity() StorableCapacity {
 	var free []int64
 	for _, p := range s.onlinePeers() {
 		free = append(free, max(p.free, 0))
+	}
+	// Blocks still being fetched back (after a restore) will take room here.
+	if st := s.stats(); st != nil {
+		local = max(local-st.Health.MissingBytes, 0)
 	}
 	c := StorableCapacity{Local: local, Sites: len(free), Copies: min(Copies, len(free))}
 	if c.Copies == 0 {

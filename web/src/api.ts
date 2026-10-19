@@ -47,7 +47,7 @@ export type PeerInfo = {
   site_id: string; name: string; address: string; added: number; online: boolean
   last_seen: number; up_since: number; capacity: number; free: number; last_error: string
   reconciled: number; counted: boolean; replicas_out: number; removing: number; bytes_out: number; held_blocks: number; held_bytes: number
-  path: PathInfo; relays: number; version: string; out_bps: number; in_bps: number
+  path: PathInfo; relays: number; version: string; out_bps: number; in_bps: number; restore_bps: number
 }
 
 export type RelayInfo = {
@@ -77,10 +77,11 @@ export type Dashboard = {
   }
   replication: {
     blocks: number; bytes: number; under_replicated: number; over_replicated: number
-    pending_bytes: number; missing_locally: number; pending_deletes: number; no_room: number; copies_made: number; copies_possible: number; copying: number; copying_bytes: number
+    pending_bytes: number; missing_locally: number; missing_bytes: number; pending_deletes: number; no_room: number; copies_made: number; copies_possible: number; copying: number; copying_bytes: number
   }
   ibs_capacity: IBSCapacity
   counted: boolean // the figures above are in; false right after a start
+  restore_bps: number // blocks fetched back from other sites' copies, bytes/s
   activity: { writing: boolean; deleting: boolean; buckets: Record<string, 'writing' | 'deleting'> }
   nodes: NodeInfo[]
   peers: PeerInfo[]

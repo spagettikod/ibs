@@ -9,8 +9,10 @@ type Edge = { key: string; a: string; b: string; link: Link }
 /** Copy traffic between this site and each other site, bytes per second. */
 export type Rates = Record<string, { out: number; in: number }>
 
-export function ratesOf(peers: { site_id: string; out_bps: number; in_bps: number }[]): Rates {
-  return Object.fromEntries(peers.map((p) => [p.site_id, { out: p.out_bps, in: p.in_bps }]))
+// Data coming here counts its copies arriving and, after a restore, this
+// site's own blocks coming back.
+export function ratesOf(peers: { site_id: string; out_bps: number; in_bps: number; restore_bps?: number }[]): Rates {
+  return Object.fromEntries(peers.map((p) => [p.site_id, { out: p.out_bps, in: p.in_bps + (p.restore_bps ?? 0) }]))
 }
 
 type Props = {
@@ -184,8 +186,13 @@ export default function NetworkGraph({ selfId, selfName, selfUpSince, sites, lin
   const [hover, setHover] = useState<string>() // node or 'relay:<id>' under the pointer: its name is shown
   const { ref, width } = useWidth()
   const W = Math.max(width, 300)
-  const narrow = W < 520
-  const H = compact ? (narrow ? 300 : 340) : narrow ? 380 : 460
+  // As large as the sites need, airy but no larger: one other site sits
+  // beside this one with the relays above and below; more go on a ring.
+  const others = new Set([...sites.map((x) => x.site_id), ...links.flatMap((l) => [l.from, l.to])]
+    .filter((id) => id !== selfId && !id.startsWith('relay:'))).size
+  const ry = others <= 1 ? 0 : others <= 3 ? 110 : compact ? 130 : 150
+  const relayR = others <= 1 ? 70 : 0.5 * ry // relays' distance from this site, up and down
+  const H = 2 * (Math.max(ry, relayR) + 50)
   const cx = W / 2
   const cy = H / 2
 
@@ -207,9 +214,8 @@ export default function NetworkGraph({ selfId, selfName, selfUpSince, sites, lin
     const self = byId.get(selfId)!
     self.x = cx
     self.y = cy
-    const rx = Math.max(Math.min(cx - 56, 300), 60)
-    const ry = cy - 52
     const n = others.length
+    const rx = Math.max(Math.min(cx - 56, n <= 1 ? 240 : 300), 60)
     const start = n === 1 ? 0 : -Math.PI / 2
     others.forEach((o, i) => {
       const angle = start + (2 * Math.PI * i) / Math.max(n, 1)
@@ -221,7 +227,7 @@ export default function NetworkGraph({ selfId, selfName, selfUpSince, sites, lin
     // to them and through them don't overlap the direct connections.
     const relayPos: RelayPos[] = relays.map((r, i) => {
       const angle = start + Math.PI / Math.max(n, 2) + (2 * Math.PI * i) / relays.length
-      return { ...r, x: cx + 0.5 * rx * Math.cos(angle), y: cy + 0.5 * ry * Math.sin(angle) }
+      return { ...r, x: cx + 0.5 * rx * Math.cos(angle), y: cy + (n <= 1 ? relayR : 0.5 * ry) * Math.sin(angle) }
     })
 
     // One edge per pair of sites: this site's own report wins, otherwise the newest.
@@ -240,7 +246,7 @@ export default function NetworkGraph({ selfId, selfName, selfUpSince, sites, lin
       if (better) pairs.set(key, { key, a: l.from, b: l.to, link: l })
     }
     return { nodes: [...byId.values()], relayPos, edges: [...pairs.values()], uplinks }
-  }, [selfId, selfName, selfUpSince, sites, links, relays, cx, cy])
+  }, [selfId, selfName, selfUpSince, sites, links, relays, cx, cy, ry, relayR])
 
   const node = (id: string) => nodes.find((n) => n.id === id)
   // Sites with a connection through a relay, as "site|relay".

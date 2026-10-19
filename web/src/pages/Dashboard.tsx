@@ -37,7 +37,8 @@ function attention(d: Dashboard, tls?: TLSStatus, updates?: UpdatesInfo, scrub?:
     else if (!n.online) out.push({ level: 'warn', text: `Files on storage node ${n.name} are read from other sites for now: the node is offline (seen ${ago(n.last_seen)})`, href: '#/nodes', link: 'Nodes' })
   }
   if (counted && r.missing_locally > 0) {
-    out.push({ level: 'warn', text: `${r.missing_locally.toLocaleString()} blocks are read from other sites for now: they're missing here and being restored`, href: '#/nodes', link: 'Nodes' })
+    out.push({ level: 'warn', text: `Some of your files are read from other sites until they're back here: ${fmtBytes(r.missing_bytes)} ` +
+      `(${r.missing_locally.toLocaleString()} blocks) is being restored from the copies there`, href: '#/nodes', link: 'Nodes' })
   }
   // Other sites' copies make way for this site's own files, so they count as
   // room; those of offline sites don't, they can't be pushed away.
@@ -111,9 +112,12 @@ export default function DashboardPage() {
   const network = data.network ?? []
   // Room for this site's files: free space, and other sites' copies that make
   // way for them (not those of offline sites, which can't be pushed away).
+  // Blocks still being fetched back from other sites (after a restore) count
+  // as used: the room shown is what's left once they are all here.
   const giving = site.held_bytes - site.held_offline
-  const roomForMine = site.free + giving
-  const mine = Math.max(site.capacity - site.free - site.held_bytes, 0)
+  const restoring = r.missing_bytes ?? 0
+  const roomForMine = Math.max(site.free + giving - restoring, 0)
+  const mine = Math.min(Math.max(site.capacity - site.free - site.held_bytes, 0) + restoring, site.capacity)
   const online = network.filter((n) => n.online).length + 1
   // Of the copies the other sites can take now: with fewer sites than copies,
   // the rest wait for another site (the health list says so).
@@ -127,6 +131,10 @@ export default function DashboardPage() {
   const act = data.activity
   const busy = act?.writing && act?.deleting ? 'Files arriving and being deleted…'
     : act?.writing ? 'Files arriving…' : act?.deleting ? 'Files being deleted…' : ''
+  // After a restore: your files' blocks coming back from the copies on other sites.
+  const restoreNote = restoring > 0 && (data.restore_bps > 0
+    ? <>Restoring from other sites: {fmtBytes(restoring)} left · {fmtSpeed(data.restore_bps)} · about {fmtDuration(restoring / data.restore_bps)}</>
+    : <>Restoring from other sites: {fmtBytes(restoring)} left{(data.peers ?? []).some((p) => p.online) ? '' : ', waiting for another site to come online'}</>)
   // Copies per file on other sites: wanted, and what the online sites allow.
   const want = data.ibs_capacity.copies
   const have = Math.min(data.ibs_capacity.sites, want)
@@ -162,8 +170,9 @@ export default function DashboardPage() {
           </>
         ) : (
           <>
-            <Stat label="Your files" value={<>{fmtBytes(site.object_bytes)}{busy && <> <Spinner title={busy} /></>}</>}
+            <Stat label="Your files" value={<>{fmtBytes(site.object_bytes)}{(busy || restoreNote) && <> <Spinner title={busy || 'Restoring from other sites'} /></>}</>}
               sub={<>{busy && <div className="accent-text">{busy}</div>}
+                {restoreNote && <div className="accent-text">{restoreNote}</div>}
                 {`${site.objects.toLocaleString()} ${site.objects === 1 ? 'object' : 'objects'} in ${site.buckets} ${site.buckets === 1 ? 'bucket' : 'buckets'}, ${r.blocks.toLocaleString()} ${r.blocks === 1 ? 'block' : 'blocks'}`}</>} />
             <Stat label="Copies on other sites" value={r.copying > 0 ? `${copied}%` : `${have} of ${want}`}
               tone={r.under_replicated === 0 ? 'ok' : 'warn'}
@@ -171,8 +180,9 @@ export default function DashboardPage() {
                 : r.under_replicated > 0 && have < want ? `per file; the next needs ${want - have === 1 ? 'another site' : 'more sites'}`
                 : r.under_replicated > 0 ? `per file; ${r.under_replicated.toLocaleString()} blocks wait for room`
                 : 'per file, all in place'} />
-            <Stat label="Room for your files" value={<>{fmtBytes(roomForMine)}{busy && <> <Spinner title={busy} /></>}</>}
+            <Stat label="Room for your files" value={<>{fmtBytes(roomForMine)}{(busy || restoreNote) && <> <Spinner title={busy || 'Restoring from other sites'} /></>}</>}
               sub={<><Meter used={mine} total={site.capacity} />
+                {restoring > 0 && <div>once the {fmtBytes(restoring)} being restored is back</div>}
                 {site.held_bytes > 0
                   ? <>{fmtBytes(site.free)} empty, {fmtBytes(giving)} other sites' copies that make way for yours
                     {site.held_offline > 0 && `; ${fmtBytes(site.held_offline)} held for offline sites`}</>

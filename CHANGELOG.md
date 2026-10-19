@@ -12,6 +12,14 @@ the launcher and the relay are released separately.
   running, except the newest you can roll back to.
 - Confirmations and error messages show in the page's own style instead of the
   browser's.
+- **After restoring a site**, the dashboard shows the files coming back: a spinner, how
+  much is left, the speed and about how long. The diagram shows them flowing in.
+- The diagram takes only the room its sites need.
+
+### Fixed
+
+- **Room for your files** right after a restore showed more than you'll have: files not
+  back yet now count as used.
 
 ## 1.8.3
 

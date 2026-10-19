@@ -884,3 +884,29 @@ func TestBrowse(t *testing.T) {
 		t.Fatalf("root: %+v", root)
 	}
 }
+
+// After a restore, blocks still to be fetched back are counted, and the room
+// for files is what's left once they are here.
+func TestRestoringCountsAsUsed(t *testing.T) {
+	s := newTestSite(t)
+	ctx := context.Background()
+	s.CreateBucket("back")
+	s.SetNodeLimit(LocalNodeID, 1<<20) // so the room depends on what IBS holds, not the disk
+	s.PutObject(ctx, "back", "f", strings.NewReader(strings.Repeat("x", 5000)), "", nil)
+	s.refreshStats()
+	before := s.StorableCapacity().Local
+	var size int64
+	s.DB.QueryRow(`SELECT SUM(size) FROM blocks`).Scan(&size)
+	s.DB.Exec(`UPDATE blocks SET node_id = ''`) // as Restore leaves them
+	s.refreshStats()
+	h := s.stats().Health
+	if h.MissingLocally != 1 || h.MissingBytes != size {
+		t.Fatalf("missing: %d blocks, %d bytes; want 1, %d", h.MissingLocally, h.MissingBytes, size)
+	}
+	// The room counts the block as used while it is still to come back. (The
+	// node's free space isn't refreshed here; on a real restore it is higher
+	// by the blocks not back yet, which this takes off again.)
+	if got := s.StorableCapacity().Local; got != before-size {
+		t.Fatalf("room = %d; want %d, less the %d bytes still to come back", got, before-size, size)
+	}
+}

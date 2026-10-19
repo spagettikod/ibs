@@ -96,9 +96,10 @@ type Site struct {
 	// activeUploads: multipart uploads with a part arriving now (uploadActive).
 	activeMu      sync.Mutex
 	activeUploads map[string]int
-	replNoRoom    int64    // blocks without room so far in this pass (replicateOnce only)
-	rates         sync.Map // site id -> *peerRates: copy traffic (rates.go)
-	wasMoving     bool     // copies were moving at the last transferEvents
+	replNoRoom    int64     // blocks without room so far in this pass (replicateOnce only)
+	rates         sync.Map  // site id -> *peerRates: copy traffic (rates.go)
+	restoring     rateMeter // blocks fetched back from other sites' copies (healOnce)
+	wasMoving     bool      // copies were moving at the last transferEvents
 }
 
 // IsSetUp reports whether the data directory holds an initialized site.
