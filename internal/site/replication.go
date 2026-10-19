@@ -354,6 +354,9 @@ const lostNodesSQL = `SELECT id FROM nodes WHERE is_local = 0 AND last_seen < ?`
 // room. Blocks that exist nowhere else stay assigned to their lost node, so
 // they come back with it. Blocks held for other sites on a lost node are
 // dropped; their owners re-replicate them.
+// healWorkers is how many blocks healOnce fetches back at the same time.
+const healWorkers = 4
+
 func (s *Site) healOnce(ctx context.Context) {
 	lostCutoff := time.Now().Add(-s.cfg.NodeGrace).Unix()
 	s.DB.Exec(`UPDATE blocks SET node_id = '' WHERE node_id != '' AND node_id NOT IN (SELECT id FROM nodes)`)
@@ -363,42 +366,78 @@ func (s *Site) healOnce(ctx context.Context) {
 			s.notify(TopicReplication)
 		}
 	}
-	rows, err := s.DB.Query(`SELECT b.id, b.node_id FROM blocks b
-		WHERE b.refs > 0 AND (b.node_id = '' OR b.node_id IN (`+lostNodesSQL+`))
-			AND EXISTS (SELECT 1 FROM replicas r JOIN peers p ON p.site_id = r.site_id
-				WHERE r.block_id = b.id AND r.state = 'ok' AND p.online = 1)
-		LIMIT 64`, lostCutoff)
-	if err != nil {
-		return
-	}
-	type missing struct{ id, from string }
-	var list []missing
-	for rows.Next() {
-		var m missing
-		rows.Scan(&m.id, &m.from)
-		list = append(list, m)
-	}
-	rows.Close()
-	healed := 0
-	for _, m := range list {
-		if ctx.Err() != nil {
+	// Through all missing blocks in order, a batch at a time, healWorkers at
+	// once: one block at a time waits on each round trip and leaves most of
+	// the line unused. A block that fails waits for the next round.
+	cursor := ""
+	for ctx.Err() == nil {
+		rows, err := s.DB.QueryContext(ctx, `SELECT b.id, b.node_id FROM blocks b
+			WHERE b.refs > 0 AND b.id > ? AND (b.node_id = '' OR b.node_id IN (`+lostNodesSQL+`))
+				AND EXISTS (SELECT 1 FROM replicas r JOIN peers p ON p.site_id = r.site_id
+					WHERE r.block_id = b.id AND r.state = 'ok' AND p.online = 1)
+			ORDER BY b.id LIMIT 64`, cursor, lostCutoff)
+		if err != nil {
 			return
 		}
-		ct, from, err := s.fetchFromReplicas(ctx, m.id)
-		if err != nil {
-			continue
+		type missing struct{ id, from string }
+		var list []missing
+		for rows.Next() {
+			var m missing
+			rows.Scan(&m.id, &m.from)
+			list = append(list, m)
 		}
-		if err := s.healBlock(ctx, m.id, ct, m.from); err == nil {
-			healed++
-			s.restoring.add(int64(len(ct)))
-			s.peerRates(from).back.add(int64(len(ct)))
-		} else if errors.Is(err, ErrNoSpace) {
+		rows.Close()
+		if len(list) == 0 {
+			return
+		}
+		cursor = list[len(list)-1].id
+		var mu sync.Mutex
+		var noSpace bool
+		healed := 0
+		work := make(chan missing)
+		var wg sync.WaitGroup
+		for range healWorkers {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for m := range work {
+					ct, from, err := s.fetchFromReplicas(ctx, m.id)
+					if err != nil {
+						continue
+					}
+					err = s.healBlock(ctx, m.id, ct, m.from)
+					mu.Lock()
+					if err == nil {
+						healed++
+					} else if errors.Is(err, ErrNoSpace) {
+						noSpace = true
+					}
+					mu.Unlock()
+					if err == nil {
+						s.restoring.add(int64(len(ct)))
+						s.peerRates(from).back.add(int64(len(ct)))
+					}
+				}
+			}()
+		}
+		for _, m := range list {
+			mu.Lock()
+			stop := noSpace
+			mu.Unlock()
+			if stop || ctx.Err() != nil {
+				break
+			}
+			work <- m
+		}
+		close(work)
+		wg.Wait()
+		if healed > 0 {
+			s.log.Info("restored blocks from replicas", "count", healed)
+		}
+		if noSpace {
 			s.log.Warn("no room on any node to restore blocks; they are served from replicas")
-			break
+			return
 		}
-	}
-	if healed > 0 {
-		s.log.Info("restored blocks from replicas", "count", healed)
 	}
 }
 

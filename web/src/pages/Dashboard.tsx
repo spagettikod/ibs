@@ -182,11 +182,12 @@ export default function DashboardPage() {
                 : 'per file, all in place'} />
             <Stat label="Room for your files" value={<>{fmtBytes(roomForMine)}{(busy || restoreNote) && <> <Spinner title={busy || 'Restoring from other sites'} /></>}</>}
               sub={<><Meter used={mine} total={site.capacity} />
-                {restoring > 0 && <div>once the {fmtBytes(restoring)} being restored is back</div>}
                 {site.held_bytes > 0
                   ? <>{fmtBytes(site.free)} empty, {fmtBytes(giving)} other sites' copies that make way for yours
+                    {restoring > 0 && `, less the ${fmtBytes(restoring)} still being restored`}
                     {site.held_offline > 0 && `; ${fmtBytes(site.held_offline)} held for offline sites`}</>
-                  : <>{fmtBytes(mine)} of {fmtBytes(site.capacity)} used by your files</>}</>} />
+                  : <>{fmtBytes(mine)} of {fmtBytes(site.capacity)} used by your files
+                    {restoring > 0 && `, ${fmtBytes(restoring)} of it still being restored`}</>}</>} />
           </>
         )}
         <a className="tile-link" href="#/network"><Stat label="The IBS"

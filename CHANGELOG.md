@@ -11,6 +11,8 @@ the launcher and the relay are released separately.
   they only say how to reach your site; the rest comes from your site when the other
   site joins. Through a relay, the joining site needs no relay token. Sites before
   1.8.5 can't read the new invites; through a relay it needs relay 1.6.0.
+- **Restoring a site is faster:** files come back from the other sites four blocks at a
+  time, one batch after another, instead of one block at a time every few seconds.
 
 ## 1.8.4
 
