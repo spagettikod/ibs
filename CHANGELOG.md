@@ -3,6 +3,15 @@
 Each release says what to update and which launcher and relay it works with: IBS,
 the launcher and the relay are released separately.
 
+## Unreleased
+
+### New
+
+- **Long invites are about a third as long** (around 100 characters with two relays):
+  they only say how to reach your site; the rest comes from your site when the other
+  site joins. Through a relay, the joining site needs no relay token. Sites before
+  1.8.5 can't read the new invites; through a relay it needs relay 1.6.0.
+
 ## 1.8.4
 
 **What to update:** sites, under **Settings → Updates**; nodes follow.

@@ -53,7 +53,12 @@ func (s *Site) CreateInviteCode(ctx context.Context) (string, error) {
 	if rc == nil {
 		return "", errors.New("short invite codes need a connected relay")
 	}
-	invite, err := s.CreateInvite()
+	secret, err := s.newInviteSecret()
+	if err != nil {
+		return "", err
+	}
+	// The full invite, sent once the joining site proved it knows the words.
+	invite, err := s.fullInvite(secret)
 	if err != nil {
 		return "", err
 	}
@@ -93,7 +98,8 @@ func (s *Site) CreateInviteCode(ctx context.Context) (string, error) {
 // reclaimCodes claims this site's open invite codes again on a relay that
 // (re)connected, e.g. after the relay restarted and forgot them.
 func (s *Site) reclaimCodes(rc *relay.Client) {
-	rows, err := s.DB.Query(`SELECT number, expires FROM invite_codes WHERE relay_id = ? AND used = 0 AND expires > ?`, rc.ID(), time.Now().Unix())
+	// relay_id '*': a long invite's name, claimed on every relay.
+	rows, err := s.DB.Query(`SELECT number, expires FROM invite_codes WHERE relay_id IN (?, '*') AND used = 0 AND expires > ?`, rc.ID(), time.Now().Unix())
 	if err != nil {
 		return
 	}
@@ -215,6 +221,9 @@ func fetchInvite(conn net.Conn, number, words string) (string, error) {
 // Join joins the IBS with either a short invite code or a long invite.
 func (s *Site) Join(ctx context.Context, text string) (*PeerInfo, error) {
 	t := strings.TrimSpace(text)
+	if strings.HasPrefix(t, longInvitePrefix) {
+		return s.JoinWithLongInvite(ctx, t)
+	}
 	if strings.HasPrefix(t, invitePrefix) {
 		return s.JoinWithInvite(ctx, t)
 	}
@@ -229,7 +238,7 @@ func formatCode(address, number string, words []string) string {
 
 // parseCode reads "relay.example.com[:port] 7-comet-harbor-violet".
 func parseCode(code string) (address, number, words string, err error) {
-	bad := errors.New(`not an invite code: expected something like "relay.example.com 7-comet-harbor-violet", or a long invite (ibs2.…)`)
+	bad := errors.New(`not an invite code: expected something like "relay.example.com 7-comet-harbor-violet", or a long invite (ibs3.…)`)
 	f := strings.Fields(strings.ToLower(code))
 	if len(f) != 2 {
 		return "", "", "", bad

@@ -54,6 +54,7 @@ func (s *Site) peerHandler() http.Handler {
 		}
 	}
 	mux.HandleFunc("POST /peer/v1/pair", s.handlePair)
+	mux.HandleFunc("POST /peer/v1/invite", s.handleInviteFetch) // a long invite's details, for its secret
 	mux.HandleFunc("POST /cluster/v1/register", s.handleNodeRegister)
 	mux.HandleFunc("POST /peer/v1/leave", paired(s.handleLeave))
 	mux.HandleFunc("GET /peer/v1/status", paired(func(w http.ResponseWriter, r *http.Request) {
@@ -102,7 +103,7 @@ func (s *Site) peerHandler() http.Handler {
 			http.Error(w, "storage nodes must register over the local network", http.StatusForbidden)
 			return
 		}
-		if !ok && origin != originTCP && !(r.Method == http.MethodPost && r.URL.Path == "/peer/v1/pair") &&
+		if !ok && origin != originTCP && !(r.Method == http.MethodPost && (r.URL.Path == "/peer/v1/pair" || r.URL.Path == "/peer/v1/invite")) &&
 			!(r.Method == http.MethodGet && r.URL.Path == "/peer/v1/backup") {
 			http.Error(w, "site is not paired with "+s.Name(), http.StatusForbidden)
 			return

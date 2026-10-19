@@ -56,3 +56,32 @@ func TestInviteFormats(t *testing.T) {
 		}
 	}
 }
+
+func TestLongInviteFormat(t *testing.T) {
+	pub, _, _ := ed25519.GenerateKey(rand.Reader)
+	li := longInvite{SiteID: keys.SiteID(pub), Secret: keys.RandomToken(12), Address: "192.168.1.20:7443",
+		Relays: []string{"ibs-relay.example.com:7444", "relay2.example.org:7500"}}
+	tok, err := encodeLongInvite(li)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := decodeLongInvite(tok)
+	if err != nil || !reflect.DeepEqual(got, li) {
+		t.Fatalf("round trip:\n got %+v\nwant %+v (%v)", got, li, err)
+	}
+	// Like the user's: two relays, no direct address.
+	two := longInvite{SiteID: li.SiteID, Secret: li.Secret, Relays: []string{"relay-a.example.com:7444", "relay-b.example.com:7444"}}
+	short, _ := encodeLongInvite(two)
+	t.Logf("two relays: %d characters: %s", len(short), short)
+	if len(short) > 110 {
+		t.Fatalf("invite is %d characters", len(short))
+	}
+	if got, err := decodeLongInvite(short[:30] + "\n " + short[30:]); err != nil || got.Secret != li.Secret {
+		t.Fatalf("wrapped invite: %v", err)
+	}
+	for _, bad := range []string{"ibs3.", "ibs3.!!!", tok[:30], tok + "A"} {
+		if _, err := decodeLongInvite(bad); err == nil {
+			t.Errorf("accepted a malformed invite %q", bad)
+		}
+	}
+}

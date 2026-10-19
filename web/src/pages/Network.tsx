@@ -267,7 +267,7 @@ function JoinDialog({ onClose, onDone }: { onClose: () => void; onDone: () => vo
           Invite
           <textarea autoFocus rows={3} className="mono" placeholder="relay.example.com 7-comet-harbor-violet" value={token}
             onChange={(e) => setToken(e.target.value)} />
-          <small className="muted">The code or long invite (ibs2.…) from the other site's <b>Invite a site</b>.</small>
+          <small className="muted">The code or long invite (ibs3.…) from the other site's <b>Invite a site</b>.</small>
         </label>
         <ErrorBox error={error} />
         <div className="row">

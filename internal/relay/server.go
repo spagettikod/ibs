@@ -660,7 +660,7 @@ const (
 // claimCode records that siteID handed out code number name until unix time
 // expires. It returns "" or why not.
 func (s *Server) claimCode(siteID, name string, expires int64) string {
-	if !validCodeNumber(name) {
+	if !validCodeNumber(name) && !validInviteName(name) {
 		return "invalid code number"
 	}
 	until := time.Unix(expires, 0)
@@ -695,6 +695,20 @@ func (s *Server) takeCode(name string) (string, bool) {
 		return "", false
 	}
 	return c.siteID, true
+}
+
+// validInviteName: a long invite's name, "i" and 20 hex digits, made from
+// its secret (since relay 1.6.0).
+func validInviteName(s string) bool {
+	if len(s) != 21 || s[0] != 'i' {
+		return false
+	}
+	for _, r := range s[1:] {
+		if !(r >= '0' && r <= '9' || r >= 'a' && r <= 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func validCodeNumber(s string) bool {

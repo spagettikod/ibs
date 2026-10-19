@@ -170,7 +170,7 @@ func (s *Server) routes() {
 		return writeJSON(w, nonNil(p))
 	}))
 	m.HandleFunc("POST /api/peers/invite", a(func(w http.ResponseWriter, r *http.Request, st *site.Site) error {
-		t, err := st.CreateInvite()
+		t, err := st.CreateInvite(r.Context())
 		if err != nil {
 			return badRequest(err.Error())
 		}

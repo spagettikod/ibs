@@ -604,11 +604,24 @@ type invite struct {
 	Relays  []string
 }
 
-// CreateInvite returns a token another site's admin pastes to pair with us.
-func (s *Site) CreateInvite() (string, error) {
-	addr := s.Setting("peer_advertise")
-	relays := s.relayTokens()
-	if addr == "" && len(relays) == 0 {
+// CreateInvite returns the long invite another site's admin pastes to pair
+// with us (invitelong.go).
+func (s *Site) CreateInvite(ctx context.Context) (string, error) {
+	secret, err := s.newInviteSecret()
+	if err != nil {
+		return "", err
+	}
+	var relays []string
+	for _, rc := range s.relayClients() {
+		relays = append(relays, rc.Token.Address)
+	}
+	s.claimInvite(ctx, secret, time.Now().Add(inviteTTL))
+	return encodeLongInvite(longInvite{SiteID: s.ID.SiteID, Secret: secret, Address: s.Setting("peer_advertise"), Relays: relays})
+}
+
+// newInviteSecret makes the one-time secret of a new invite.
+func (s *Site) newInviteSecret() (string, error) {
+	if s.Setting("peer_advertise") == "" && len(s.relayTokens()) == 0 {
 		return "", errors.New("other sites cannot reach this site yet: add a relay or set a direct address on The Known Universe page")
 	}
 	secret := keys.RandomToken(12) // one use within a day: 96 bits is plenty
@@ -617,7 +630,7 @@ func (s *Site) CreateInvite() (string, error) {
 		secret, now.Unix(), now.Add(inviteTTL).Unix()); err != nil {
 		return "", err
 	}
-	return encodeInvite(invite{Address: addr, PubKey: base64.RawURLEncoding.EncodeToString(s.ID.Pub), Secret: secret, Relays: relays})
+	return secret, nil
 }
 
 type pairRequest struct {

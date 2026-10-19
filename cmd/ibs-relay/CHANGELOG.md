@@ -4,6 +4,16 @@ The relay (`ghcr.io/spagettikod/ibs/relay`) is versioned separately from IBS and
 released when it changes. Before 1.2.0, its changes are in the IBS changelog. Each
 release says which IBS versions it works with.
 
+## 1.6.0
+
+**What to update:** relays, by pulling the new image (keep `/data`). Needed to join
+through the relay with the shorter long invites of IBS 1.8.5.
+
+**Works with:** every IBS 1.x site; the shorter long invites need IBS 1.8.5 or newer.
+
+- **Long invites:** a site can claim a name for its long invite, like an invite code
+  number, and a site joining with the invite is put through to it.
+
 ## 1.5.0
 
 **What to update:** relays, by pulling the new image (keep `/data`). Needed to restore a
