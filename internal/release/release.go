@@ -35,9 +35,9 @@ type Manifest struct {
 	Platform      string `json:"platform"`
 	SHA256        string `json:"sha256"` // of the program
 	Size          int64  `json:"size"`
-	MinCompatible string `json:"min_compatible"` // oldest IBS version this one works with
-	DBLevel       int    `json:"db_level"`       // database changes it knows; it can't run on a database changed further
-	Released      int64  `json:"released"`       // unix time
+	MinCompatible string `json:"min_compatible"`  // oldest IBS version this one works with
+	DBLevel       int    `json:"db_level"`        // database changes it knows; it can't run on a database changed further
+	Released      int64  `json:"released"`        // unix time
 	Notes         string `json:"notes,omitempty"` // what changed, from the changelog (Markdown)
 }
 
