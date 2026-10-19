@@ -34,6 +34,11 @@ export function fmtDate(iso: string): string {
   return new Date(iso).toLocaleString()
 }
 
+/** A date without the time, e.g. "Oct 19, 2026"; put the full time in a title. */
+export function fmtDay(d: Date): string {
+  return d.toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' })
+}
+
 export function shortId(id: string) {
   return id.slice(0, 8)
 }

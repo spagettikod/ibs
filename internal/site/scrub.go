@@ -715,6 +715,14 @@ func (s *Site) ScrubStatus() ScrubInfo {
 	return info
 }
 
+// ScrubErrors lists the problems a scrub in the history found.
+func (s *Site) ScrubErrors(id int64) []ScrubError {
+	if errs := s.scrubErrors(id); errs != nil {
+		return errs
+	}
+	return []ScrubError{}
+}
+
 func (s *Site) scrubErrors(id int64) []ScrubError {
 	out := []ScrubError{}
 	rows, err := s.DB.Query(`SELECT at, what, block_id, place, problem, outcome, detail FROM scrub_errors WHERE scrub_id = ? ORDER BY at, rowid LIMIT 1000`, id)

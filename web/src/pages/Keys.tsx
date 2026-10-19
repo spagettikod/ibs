@@ -1,6 +1,6 @@
 import { FormEvent, useState } from 'react'
 import { AccessKey, api, Bucket, State } from '../api'
-import { ask, Card, Copy, Empty, ErrorBox, fmtDate, Modal, useLoader } from '../ui'
+import { ask, Card, Copy, Empty, ErrorBox, fmtDate, fmtDay, Modal, useLoader } from '../ui'
 
 type KeyForm = { name: string; access: 'full' | 'read'; buckets: string[] | null }
 
@@ -142,7 +142,7 @@ aws --endpoint-url ${endpoint} s3 ls`
                   <td className="mono">{k.id}</td>
                   <td>{k.name || <span className="muted">—</span>}</td>
                   <td>{accessText(k)}</td>
-                  <td>{fmtDate(k.created)}</td>
+                  <td title={fmtDate(k.created)}>{fmtDay(new Date(k.created))}</td>
                   <td className="right">
                     <div className="row-end">
                       <button className="btn small" onClick={() => { setEditError(undefined); setEditing({ id: k.id, form: { name: k.name, access: k.access, buckets: k.buckets } }) }}>Edit</button>

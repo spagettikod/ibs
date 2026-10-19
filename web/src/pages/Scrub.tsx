@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { api, CopyCheck, Scrub, ScrubError, ScrubInfo } from '../api'
-import { ago, ask, Card, Empty, ErrorBox, fmtBytes, fmtDuration, Meter, useLoader, useTick } from '../ui'
+import { ago, ask, Card, Empty, ErrorBox, fmtBytes, fmtDay, fmtDuration, Meter, Modal, Spinner, useLoader, useTick } from '../ui'
 
 const INTERVALS = [7, 14, 30, 60, 90]
 
@@ -59,6 +59,7 @@ function inDays(unix: number) {
 
 export default function ScrubPage() {
   const { data, error, reload } = useLoader(() => api<ScrubInfo>('GET', '/api/scrub'), ['scrub'], 30000)
+  const [details, setDetails] = useState<Scrub>()
   const [actionError, setActionError] = useState<string>()
   useTick()
   if (!data) return <ErrorBox error={error} />
@@ -123,30 +124,13 @@ export default function ScrubPage() {
               <option value={0}>only by hand</option>
             </select>
           </label>
-          {data.next_due && !cur ? <span className="muted small">Next scrub {inDays(data.next_due)}.</span> : null}
+          {data.next_due && !cur ? <span className="muted small" title={new Date(data.next_due * 1000).toLocaleString()}>Next scrub {inDays(data.next_due)}.</span> : null}
         </div>
       </Card>
 
       <Card title={cur ? 'Problems found so far' : 'Problems found in the last scrub'}>
-        {!shown ? <Empty>No scrub has run yet.</Empty> : data.errors.length === 0 ? <Empty>None{cur ? ' so far' : ''}.</Empty> : (
-          <table>
-            <thead><tr><th>Found</th><th>What</th><th>Where</th><th>Problem</th><th>Result</th></tr></thead>
-            <tbody>
-              {data.errors.map((e, i) => (
-                <tr key={i}>
-                  <td className="nowrap">{ago(e.at)}</td>
-                  <td>{WHAT[e.what]}{e.block_id && <div className="muted mono small" title={e.block_id}>{e.block_id.slice(0, 16)}…</div>}</td>
-                  <td>{e.place || '—'}</td>
-                  <td>{e.problem}</td>
-                  <td>
-                    <Outcome e={e} />
-                    {e.detail && <div className="muted small">{e.detail}</div>}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+        {!shown ? <Empty>No scrub has run yet.</Empty> : data.errors.length === 0 ? <Empty>None{cur ? ' so far' : ''}.</Empty>
+          : <Problems errors={data.errors} />}
       </Card>
 
       <CopiesCard />
@@ -163,13 +147,15 @@ export default function ScrubPage() {
                     <div className="muted small">{h.manual ? 'by hand' : 'on schedule'}</div></td>
                   <td>{h.finished ? fmtDuration(h.finished - h.started) : h.state === 'paused' ? 'paused' : 'running'}</td>
                   <td className="num">{fmtBytes(h.bytes)}<div className="muted small">{h.checked.toLocaleString()} here{h.copies > 0 && `, ${h.copies.toLocaleString()} elsewhere`}</div></td>
-                  <td>{h.state === 'stopped' ? <span className="muted">Stopped · </span> : null}{scrubResult(h)}</td>
+                  <td>{h.state === 'stopped' ? <span className="muted">Stopped · </span> : null}{scrubResult(h)}
+                    {h.repaired + h.failed > 0 && <> <button className="btn small ghost" onClick={() => setDetails(h)}>Details</button></>}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
       </Card>
+      {details && <ScrubDetails scrub={details} onClose={() => setDetails(undefined)} />}
     </div>
   )
 }
@@ -199,7 +185,8 @@ function CopiesCard() {
               <tr key={c.site_id}>
                 <td>{c.name}</td>
                 <td className="num">{c.copies.toLocaleString()}</td>
-                <td title={c.scrubbed ? ago(c.scrubbed) : undefined}>{c.scrubbed ? when(c.scrubbed) : <span className="muted">not yet</span>}</td>
+                <td title={c.scrubbed ? `${new Date(c.scrubbed * 1000).toLocaleString()}, ${ago(c.scrubbed)}` : undefined}>
+                  {c.scrubbed ? fmtDay(new Date(c.scrubbed * 1000)) : <span className="muted">not yet</span>}</td>
                 <td>{!c.scrubbed ? '—' : c.bad > 0
                   ? <span className="warn-text">{c.bad.toLocaleString()} missing or damaged, copied again from this site</span>
                   : `${c.checked.toLocaleString()} checked, all identical`}</td>
@@ -209,5 +196,39 @@ function CopiesCard() {
         </table>
       )}
     </Card>
+  )
+}
+
+/** The problems a scrub found, with what was done about each. */
+function Problems({ errors }: { errors: ScrubError[] }) {
+  return (
+    <table>
+      <thead><tr><th>Found</th><th>What</th><th>Where</th><th>Problem</th><th>Result</th></tr></thead>
+      <tbody>
+        {errors.map((e, i) => (
+          <tr key={i}>
+            <td className="nowrap" title={new Date(e.at * 1000).toLocaleString()}>{ago(e.at)}</td>
+            <td>{WHAT[e.what]}{e.block_id && <div className="muted mono small" title={e.block_id}>{e.block_id.slice(0, 16)}…</div>}</td>
+            <td>{e.place || '—'}</td>
+            <td>{e.problem}</td>
+            <td>
+              <Outcome e={e} />
+              {e.detail && <div className="muted small">{e.detail}</div>}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
+
+/** A scrub from the history and the problems it found. */
+function ScrubDetails({ scrub, onClose }: { scrub: Scrub; onClose: () => void }) {
+  const { data, error } = useLoader(() => api<ScrubError[]>('GET', `/api/scrub/${scrub.id}/errors`))
+  return (
+    <Modal title={`Scrub of ${fmtDay(new Date(scrub.started * 1000))}: ${scrubResult(scrub)}`} onClose={onClose}>
+      <ErrorBox error={error} />
+      {!data ? <Spinner /> : data.length === 0 ? <Empty>No problems recorded.</Empty> : <Problems errors={data} />}
+    </Modal>
   )
 }

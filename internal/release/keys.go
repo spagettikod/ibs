@@ -4,7 +4,7 @@ package release
 // always trusted and never removable. Its private half is the signing key,
 // used with OpenSSL (~/.config/ibs/signing.key on the maintainer's machine;
 // see DEVELOPMENT.md).
-var DefaultKey = mustKey("ibspub1:HUX9q7eGaKKt0mBFsfMIrjChsjF3xH7lg7eOAwhIgm8", "IBS releases")
+var DefaultKey = mustKey("ibspub1:HUX9q7eGaKKt0mBFsfMIrjChsjF3xH7lg7eOAwhIgm8", "Official release key")
 
 // BuiltinKeys are the release keys built into this build: always trusted and
 // never removable. IBS saves them in the data directory on start, so a

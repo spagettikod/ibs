@@ -5,10 +5,19 @@ the launcher and the relay are released separately.
 
 ## Unreleased
 
+### New
+
+- **Scrub history:** a scrub that found problems has **Details**, listing them; they were
+  kept but only the latest scrub's could be seen.
+- **Check now** is on the Versions card of the Updates page.
+
 ### Fixed
 
 - **On a phone, Settings** opened General right away; it now unfolds its sections in the
   menu to choose from, as on a computer.
+- Access keys' created date and a scrub's "Last checked" show the date only, with the time
+  on hover; "Next scrub" shows its date and time on hover.
+- The built-in release key is called **Official release key** (was "IBS releases").
 
 ## 1.8.7
 

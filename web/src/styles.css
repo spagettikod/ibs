@@ -269,6 +269,7 @@ input:focus, textarea:focus, select:focus { outline: 2px solid color-mix(in srgb
 .modal-backdrop { position: fixed; inset: 0; background: rgba(8, 11, 18, 0.6); display: flex; align-items: flex-start;
   justify-content: center; padding: 10vh 16px 16px; z-index: 50; overflow-y: auto; }
 .modal { width: 100%; max-width: 520px; display: flex; flex-direction: column; gap: 12px; }
+.modal:has(table) { max-width: 860px; overflow-x: auto; }
 .modal .card-head { margin-bottom: 0; }
 .dialog-message { white-space: pre-line; line-height: 1.5; }
 .btn.danger.solid { background: var(--bad); border-color: var(--bad); color: #fff; }

@@ -340,6 +340,13 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/scrub", a(func(w http.ResponseWriter, r *http.Request, st *site.Site) error {
 		return writeJSON(w, st.ScrubStatus())
 	}))
+	m.HandleFunc("GET /api/scrub/{id}/errors", a(func(w http.ResponseWriter, r *http.Request, st *site.Site) error {
+		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		if err != nil {
+			return badRequest("bad scrub id")
+		}
+		return writeJSON(w, st.ScrubErrors(id))
+	}))
 	m.HandleFunc("GET /api/scrub/copies", a(func(w http.ResponseWriter, r *http.Request, st *site.Site) error {
 		return writeJSON(w, nonNil(st.CopyChecks()))
 	}))

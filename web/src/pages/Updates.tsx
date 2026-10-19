@@ -103,6 +103,10 @@ export default function UpdatesSection() {
       )}
       <Card title="Versions" actions={
         <div className="row">
+          {data.github && (
+            <button className="btn small" disabled={checking || !!data.github_retry} title={data.github_retry ? "GitHub's limit is used up" : undefined}
+              onClick={checkNow}>{checking ? 'Checking…' : 'Check now'}</button>
+          )}
           {data.old.remove.length > 0 && <button className="btn small" onClick={removeOld}>Remove old versions</button>}
           <button className="btn small" onClick={() => setDialog('upload')}>Upload a version</button>
         </div>}>
@@ -111,6 +115,18 @@ export default function UpdatesSection() {
           {data.launcher ? 'Install a newer version, or roll back to an older one that still works with this site and the IBS.'
             : 'It was started without the IBS launcher, so it can\'t switch versions here: update its image instead.'}
         </p>
+        {data.github && (
+          <p className="muted small">
+            {checking ? 'Asking GitHub for new versions…'
+              : data.github_checked ? `GitHub last checked ${Date.now() / 1000 - data.github_checked < 10 ? 'just now' : ago(data.github_checked)}.${checked ? ' ' + checked : ''}`
+              : 'GitHub not checked yet.'}
+          </p>
+        )}
+        {data.github && data.github_retry
+            ? <div className="small warn-text">
+                Can't check GitHub for new versions until {new Date(data.github_retry * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}: {data.github_error}. Your other sites still pass new versions on.
+              </div>
+            : data.github && data.github_error && <div className="small warn-text">Last check failed: {data.github_error}</div>}
         <ErrorBox error={actionError} />
         {msg && <div className="success">{msg}</div>}
         {restarting && <div className="notice">Restarting into IBS {restarting}… This page reloads when it's back.</div>}
@@ -183,11 +199,6 @@ export default function UpdatesSection() {
               </select>
             </label>
           )}
-          {data.github && data.github_retry
-            ? <div className="small warn-text">
-                Can't check GitHub for new versions until {new Date(data.github_retry * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}: {data.github_error}. Your other sites still pass new versions on.
-              </div>
-            : data.github && data.github_error && <div className="small warn-text">Last check failed: {data.github_error}</div>}
           <label className="check">
             <input type="checkbox" checked={data.betas} onChange={(e) => act(() => api('PUT', '/api/updates/settings', { betas: e.target.checked }))} />
             <span>
@@ -208,17 +219,6 @@ export default function UpdatesSection() {
               </small>
             </span>
           </label>
-          {data.github && (
-            <div className="row">
-              <button className="btn small" disabled={checking || !!data.github_retry} title={data.github_retry ? "GitHub's limit is used up" : undefined}
-                onClick={checkNow}>{checking ? 'Checking…' : 'Check now'}</button>
-              <span className="muted small">
-                {checking ? 'Asking GitHub…'
-                  : data.github_checked ? `Last checked ${Date.now() / 1000 - data.github_checked < 10 ? 'just now' : ago(data.github_checked)}.${checked ? ' ' + checked : ''}`
-                  : 'Not checked yet.'}
-              </span>
-            </div>
-          )}
           <p className="muted small">
             Sites in the IBS always tell each other which versions they run, so this site also learns about new versions
             there. Versions signed with a key this site trusts are fetched from them; nothing is ever installed by another
