@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { api, Dashboard, PathInfo, RelayInfo, Settings } from '../api'
 import { ratesOf } from '../NetworkGraph'
 import { NetworkView, useNetworkView, ViewSwitch } from '../GeoMap'
-import { ago, Card, Copy, Counted, Empty, ErrorBox, fmtBytes, fmtMs, fmtSpeed, Meter, Modal, shortId, Spinner, Status, uptime, useLoader, useSubmit, useTick, Version } from '../ui'
+import { ago, ask, Card, Copy, Counted, Empty, ErrorBox, fmtBytes, fmtMs, fmtSpeed, Meter, Modal, shortId, Spinner, Status, tell, uptime, useLoader, useSubmit, useTick, Version } from '../ui'
 
 export function PathBadge({ path, online }: { path: PathInfo; online: boolean }) {
   if (!online || !path.kind) return <span className="path none">Not connected</span>
@@ -40,8 +40,8 @@ export default function NetworkPage() {
   const done = () => { setDialog(undefined); reload() }
 
   const removeRelay = async (r: RelayInfo) => {
-    if (!confirm(`Stop using relay ${r.name}? Sites that can only reach this site through it will lose the connection.`)) return
-    await api('DELETE', `/api/relays/${r.id}`).catch((e) => alert(e.message))
+    if (!(await ask(`Stop using relay ${r.name}`, 'Sites that can only reach this site through it lose the connection.', { ok: 'Stop using it', danger: true }))) return
+    await api('DELETE', `/api/relays/${r.id}`).catch((e) => tell("Couldn't remove the relay", e.message))
     reload()
   }
 

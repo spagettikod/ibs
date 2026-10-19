@@ -1,6 +1,6 @@
 import { FormEvent, useState } from 'react'
 import { AccessKey, api, Bucket, State } from '../api'
-import { Card, Copy, Empty, ErrorBox, fmtDate, Modal, useLoader } from '../ui'
+import { ask, Card, Copy, Empty, ErrorBox, fmtDate, Modal, useLoader } from '../ui'
 
 type KeyForm = { name: string; access: 'full' | 'read'; buckets: string[] | null }
 
@@ -90,7 +90,7 @@ export default function KeysPage() {
     }
   }
   const remove = async (k: AccessKey) => {
-    if (!confirm(`Delete access key ${k.id}? Clients using it stop working.`)) return
+    if (!(await ask(`Delete access key ${k.id}`, 'Clients using it stop working.', { ok: 'Delete', danger: true }))) return
     await api('DELETE', `/api/keys/${k.id}`)
     reload()
   }

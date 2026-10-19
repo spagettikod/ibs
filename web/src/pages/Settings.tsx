@@ -4,7 +4,7 @@ import { api, Location, Settings, State, TLSSettings, TLSStatus } from '../api'
 import { baseMap } from '../GeoMap'
 import UpdatesSection from './Updates'
 import { draftFrom, emptyDraft, HTTPSDraft, HTTPSFields, settingsFrom } from '../HTTPSForm'
-import { ago, Card, ErrorBox, MIN_PASSWORD, Modal, PasswordHint, useLoader } from '../ui'
+import { ago, ask, Card, ErrorBox, MIN_PASSWORD, Modal, PasswordHint, useLoader } from '../ui'
 
 /** The Settings sections, shown as a submenu under Settings in the sidebar. */
 export const SETTINGS_SECTIONS = [
@@ -140,7 +140,7 @@ function LocationCard() {
     }
   }
   const remove = async () => {
-    if (!confirm('Remove this site from the map? Other sites will no longer see where it is.')) return
+    if (!(await ask('Remove from the map', 'Other sites will no longer see where this site is.', { ok: 'Remove', danger: true }))) return
     await api('DELETE', '/api/location').catch((e) => setError(e.message))
     setSaved(null)
     setPin(undefined)
@@ -195,7 +195,7 @@ function HTTPSCard() {
   return (
     <Card actions={!data.from_env && (
       <div className="row">
-        {on && <button className="btn small danger" onClick={() => confirm('Turn off HTTPS? The web interface and S3 go back to plain HTTP.') && save({ domains: [], require_https: false })}>Turn off</button>}
+        {on && <button className="btn small danger" onClick={async () => (await ask('Turn off HTTPS', 'The web interface and S3 go back to plain HTTP.', { ok: 'Turn off', danger: true })) && save({ domains: [], require_https: false })}>Turn off</button>}
         <button className={`btn small${on ? '' : ' primary'}`} onClick={() => setEditing(true)}>{on ? 'Change' : 'Set up HTTPS'}</button>
       </div>
     )}>

@@ -1,7 +1,7 @@
 // Command ibs-release prepares IBS release files. It never sees a private
 // key: OpenSSL signs (see scripts/release.sh and DEVELOPMENT.md).
 //
-//	ibs-release manifest -version V [-platform linux/amd64] PROGRAM > manifest.json
+//	ibs-release manifest -version V [-platform linux/amd64] [-notes FILE] PROGRAM > manifest.json
 //	openssl pkeyutl -sign -rawin -inkey KEY -in manifest.json -out manifest.sig
 //	ibs-release pack [-trust ibspub1:…] -o OUT.ibsrelease PROGRAM manifest.json manifest.sig
 //	openssl pkey -in KEY -pubout | ibs-release pubkey
@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"ibs/internal/db"
@@ -41,6 +42,7 @@ func main() {
 	ver := fs.String("version", "", "version of the program (manifest)")
 	platform := fs.String("platform", "linux/amd64", "platform the program is built for (manifest)")
 	out := fs.String("o", "", "the .ibsrelease file to write (pack)")
+	notes := fs.String("notes", "", "file with the release notes, from the changelog (manifest)")
 	var trust []string
 	fs.Func("trust", "also accept a signature by this key, ibspub1:… (pack)", func(v string) error {
 		trust = append(trust, v)
@@ -57,6 +59,9 @@ func main() {
 		sum := sha256.Sum256(program)
 		m := release.Manifest{Version: *ver, Platform: *platform, SHA256: hex.EncodeToString(sum[:]), Size: int64(len(program)),
 			MinCompatible: version.MinCompatible, DBLevel: db.Level, Released: time.Now().Unix()}
+		if *notes != "" {
+			m.Notes = strings.TrimSpace(string(read(*notes)))
+		}
 		b, _ := json.MarshalIndent(m, "", "  ")
 		os.Stdout.Write(b)
 	case "pack":

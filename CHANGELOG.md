@@ -3,6 +3,16 @@
 Each release says what to update and which launcher and relay it works with: IBS,
 the launcher and the relay are released separately.
 
+## Unreleased
+
+### New
+
+- **Release notes** for each version on the Updates page.
+- **Remove old versions** on the Updates page removes every version older than the one
+  running, except the newest you can roll back to.
+- Confirmations and error messages show in the page's own style instead of the
+  browser's.
+
 ## 1.8.3
 
 **What to update:** the relay to 1.5.0 first (pull the new image, keep `/data`), then

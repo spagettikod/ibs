@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { ReactNode, useEffect, useRef, useState } from 'react'
 import { api, State, UpdatesInfo, VersionInfo } from '../api'
-import { ago, Card, Copy, Empty, ErrorBox, fmtDate, Modal, useLoader, useSubmit } from '../ui'
+import { ago, ask, Card, Copy, Empty, ErrorBox, fmtDate, Modal, useLoader, useSubmit } from '../ui'
 
 /** Settings → Updates: versions, where to look for new ones, uploads and keys. */
 export default function UpdatesSection() {
@@ -8,6 +8,7 @@ export default function UpdatesSection() {
   const [msg, setMsg] = useState<string>()
   const [actionError, setActionError] = useState<string>()
   const [dialog, setDialog] = useState<'upload' | 'key'>()
+  const [notes, setNotes] = useState<VersionInfo>()
   const [checking, setChecking] = useState(false)
   const [checked, setChecked] = useState<string>()
   const [restarting, setRestarting] = useState<string>()
@@ -68,14 +69,27 @@ export default function UpdatesSection() {
       setChecking(false)
     }
   }
-  const install = (v: VersionInfo) => {
+  const install = async (v: VersionInfo) => {
     const older = !v.newer
-    if (!confirm(`${older ? 'Roll back' : 'Update'} to ${v.version}? IBS restarts with it, and the storage nodes follow one at a time.`)) return
+    if (!(await ask(`${older ? 'Roll back' : 'Update'} to ${v.version}`, 'IBS restarts with it, and the storage nodes follow one at a time.',
+      { ok: older ? 'Roll back' : 'Update' }))) return
     act(async () => {
       startedBefore.current = (await api<State>('GET', '/api/state')).started
       await api('POST', '/api/updates/install', { version: v.version })
       setRestarting(v.version)
     })
+  }
+
+  const removeOld = async () => {
+    const { remove, keep, fallback } = data.old
+    const list = (vs: string[]) => vs.length === 1 ? vs[0] : vs.slice(0, -1).join(', ') + ' and ' + vs[vs.length - 1]
+    const kept = [
+      keep ? `${keep} is kept, so you can roll back to it.`
+        : 'None of them can be rolled back to (a newer version changed the database, or they don\'t work with your other sites), so all of them go.',
+      fallback && fallback !== keep && `${fallback} is kept too until ${data.running} has run long enough to count as working: if ${data.running} fails, IBS goes back to it.`,
+    ].filter(Boolean).join(' ')
+    if (!(await ask('Remove old versions', `Removes ${list(remove)} from this site. ${kept}`, { ok: remove.length === 1 ? `Remove ${remove[0]}` : `Remove ${remove.length} versions`, danger: true }))) return
+    act(() => api('POST', '/api/updates/remove-old'), `Removed ${list(remove)}.`)
   }
 
   return (
@@ -87,7 +101,11 @@ export default function UpdatesSection() {
             : 'It runs on other sites; see below how to get it.'}
         </div>
       )}
-      <Card title="Versions" actions={<button className="btn small" onClick={() => setDialog('upload')}>Upload a version</button>}>
+      <Card title="Versions" actions={
+        <div className="row">
+          {data.old.remove.length > 0 && <button className="btn small" onClick={removeOld}>Remove old versions</button>}
+          <button className="btn small" onClick={() => setDialog('upload')}>Upload a version</button>
+        </div>}>
         <p className="muted small">
           This site runs <b>IBS {data.running}</b>{data.launcher_version ? `, started by IBS launcher ${data.launcher_version}` : ''}.{' '}
           {data.launcher ? 'Install a newer version, or roll back to an older one that still works with this site and the IBS.'
@@ -115,12 +133,13 @@ export default function UpdatesSection() {
                   </td>
                   <td className="right">
                     <div className="row-end">
+                      {v.notes && <button className="btn small ghost" onClick={() => setNotes(v)}>Release notes</button>}
                       {!v.current && data.launcher && (
                         <button className={`btn small ${v.newer ? 'primary' : ''}`} disabled={!!v.blocker} title={v.blocker || undefined}
                           onClick={() => install(v)}>{v.newer ? 'Install' : 'Roll back'}</button>
                       )}
                       {!v.current && (
-                        <button className="btn small danger" onClick={() => confirm(`Remove ${v.version} from this site?`) &&
+                        <button className="btn small danger" onClick={async () => (await ask(`Remove ${v.version}`, 'It is deleted from this site. You can get it again from GitHub, another site or a file.', { ok: 'Remove', danger: true })) &&
                           act(() => api('DELETE', `/api/updates/versions/${encodeURIComponent(v.version)}`))}>Remove</button>
                       )}
                     </div>
@@ -204,6 +223,11 @@ export default function UpdatesSection() {
       </Card>
 
       <KeysCard data={data} onChange={reload} onAdd={() => setDialog('key')} />
+      {notes && (
+        <Modal title={`What's new in IBS ${notes.version}`} onClose={() => setNotes(undefined)}>
+          <ReleaseNotes text={notes.notes} />
+        </Modal>
+      )}
       {dialog === 'upload' && <UploadDialog onClose={() => setDialog(undefined)} onDone={(v) => { setDialog(undefined); setMsg(`${v} added. It can be installed below.`); reload() }} />}
       {dialog === 'key' && <KeyDialog onClose={() => setDialog(undefined)} onDone={() => { setDialog(undefined); reload() }} />}
     </>
@@ -293,7 +317,7 @@ function KeysCard({ data, onChange, onAdd }: { data: UpdatesInfo; onChange: () =
                     const why = k.env ? 'Set with IBS_TRUSTED_KEYS: remove it there and restart'
                       : k.signed.length ? `Remove ${k.signed.join(', ')} first` : undefined
                     return <button className="btn small danger" disabled={!!why} title={why}
-                      onClick={() => confirm(`Stop trusting ${k.name || k.id}? Versions signed with it can no longer be added.`) &&
+                      onClick={async () => (await ask(`Stop trusting ${k.name || k.id}`, 'Versions signed with it can no longer be added.', { ok: 'Stop trusting', danger: true })) &&
                         api('DELETE', `/api/updates/keys/${k.id}`).then(onChange, (e) => setError(e.message))}>Remove</button>
                   })()}
                 </div>
@@ -304,5 +328,48 @@ function KeysCard({ data, onChange, onAdd }: { data: UpdatesInfo; onChange: () =
       </table>
       <ErrorBox error={error} />
     </Card>
+  )
+}
+
+/** **bold** and `code` in a line of release notes. */
+function inline(text: string) {
+  return text.split(/(\*\*[^*]+\*\*|`[^`]+`)/).map((part, i) =>
+    part.startsWith('**') ? <b key={i}>{part.slice(2, -2)}</b> : part.startsWith('`') ? <code key={i}>{part.slice(1, -1)}</code> : part)
+}
+
+/**
+ * Release notes from the changelog: "### New" and "### Fixed" sections of
+ * bullets; what to update and which versions it works with come last.
+ */
+function ReleaseNotes({ text }: { text: string }) {
+  // Lines wrap in the changelog: join them into headings, bullets and paragraphs.
+  const blocks: { kind: 'h' | 'li' | 'p'; text: string }[] = []
+  let open = false // the last block continues on the next line
+  for (const raw of text.split('\n')) {
+    const line = raw.trim()
+    if (!line) { open = false; continue }
+    if (raw.startsWith('### ')) { blocks.push({ kind: 'h', text: line.slice(4) }); open = false }
+    else if (raw.startsWith('- ')) { blocks.push({ kind: 'li', text: line.slice(2) }); open = true }
+    else if (open) blocks[blocks.length - 1].text += ' ' + line
+    else { blocks.push({ kind: 'p', text: line }); open = true }
+  }
+  const compat = (b: { text: string }) => /^\*\*(What to update|Works with)/.test(b.text)
+  const out: ReactNode[] = []
+  let items: string[] = []
+  const flush = () => {
+    if (items.length) out.push(<ul key={out.length}>{items.map((t, i) => <li key={i}>{inline(t)}</li>)}</ul>)
+    items = []
+  }
+  for (const b of blocks.filter((b) => !compat(b))) {
+    if (b.kind === 'li') { items.push(b.text); continue }
+    flush()
+    out.push(b.kind === 'h' ? <h3 key={out.length}>{b.text}</h3> : <p key={out.length}>{inline(b.text)}</p>)
+  }
+  flush()
+  return (
+    <div className="release-notes">
+      {out}
+      {blocks.filter(compat).map((b, i) => <p key={'c' + i} className="muted small">{inline(b.text)}</p>)}
+    </div>
   )
 }

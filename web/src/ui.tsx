@@ -235,6 +235,61 @@ export function Modal({ title, onClose, children }: { title: string; onClose: ()
   )
 }
 
+type DialogRequest = {
+  title: string
+  message: ReactNode
+  ok: string
+  cancel: boolean
+  danger: boolean
+  resolve: (ok: boolean) => void
+}
+let showDialog: ((d: DialogRequest) => void) | undefined
+
+/**
+ * Asks the user to confirm, in the page's own style instead of the browser's.
+ * Resolves true when they choose ok. Needs <Dialogs /> on the page.
+ */
+export function ask(title: string, message: ReactNode, { ok = 'OK', danger = false } = {}): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (!showDialog) return resolve(window.confirm(typeof message === 'string' ? message : title))
+    showDialog({ title, message, ok, cancel: true, danger, resolve })
+  })
+}
+
+/** Tells the user something went wrong, with only a button to close it. */
+export function tell(title: string, message: ReactNode): Promise<void> {
+  return new Promise((resolve) => {
+    if (!showDialog) return resolve(window.alert(typeof message === 'string' ? message : title))
+    showDialog({ title, message, ok: 'Close', cancel: false, danger: false, resolve: () => resolve() })
+  })
+}
+
+/** Shows the dialogs ask and tell open, one at a time. */
+export function Dialogs() {
+  const [queue, setQueue] = useState<DialogRequest[]>([])
+  useEffect(() => {
+    showDialog = (d) => setQueue((q) => [...q, d])
+    return () => { showDialog = undefined }
+  }, [])
+  const d = queue[0]
+  if (!d) return null
+  const close = (ok: boolean) => {
+    d.resolve(ok)
+    setQueue((q) => q.slice(1))
+  }
+  return (
+    <Modal title={d.title} onClose={() => close(false)}>
+      <div className="stack">
+        <div className="dialog-message">{d.message}</div>
+        <div className="row">
+          <button className={`btn ${d.danger ? 'danger solid' : 'primary'}`} autoFocus onClick={() => close(true)}>{d.ok}</button>
+          {d.cancel && <button className="btn" onClick={() => close(false)}>Cancel</button>}
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
 export const MIN_PASSWORD = 8
 
 /** Under a new-password field: the length rule, as a warning while it isn't met. */

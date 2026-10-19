@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { api, CopyCheck, Scrub, ScrubError, ScrubInfo } from '../api'
-import { ago, Card, Empty, ErrorBox, fmtBytes, fmtDuration, Meter, useLoader, useTick } from '../ui'
+import { ago, ask, Card, Empty, ErrorBox, fmtBytes, fmtDuration, Meter, useLoader, useTick } from '../ui'
 
 const INTERVALS = [7, 14, 30, 60, 90]
 
@@ -89,7 +89,7 @@ export default function ScrubPage() {
           {!cur && <button className="btn small primary" onClick={() => act('start')}>Start scrub</button>}
           {cur?.state === 'running' && <button className="btn small" onClick={() => act('pause')}>Pause</button>}
           {cur?.state === 'paused' && <button className="btn small primary" onClick={() => act('resume')}>Resume</button>}
-          {cur && <button className="btn small danger" onClick={() => confirm('Stop the scrub? It starts from the beginning next time.') && act('stop')}>Stop</button>}
+          {cur && <button className="btn small danger" onClick={async () => (await ask('Stop the scrub', 'The next scrub starts from the beginning.', { ok: 'Stop', danger: true })) && act('stop')}>Stop</button>}
         </div>
       }>
         <ErrorBox error={actionError} />

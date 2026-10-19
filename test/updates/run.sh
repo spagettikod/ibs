@@ -27,18 +27,20 @@ openssl genpkey -algorithm ed25519 -out "$WORK/test.key" || exit 1
 openssl genpkey -algorithm ed25519 -out "$WORK/other.key" || exit 1
 go build -o "$WORK/ibs-release" "$ROOT/cmd/ibs-release" || exit 1
 pubkey() { openssl pkey -in "$1" -pubout | "$WORK/ibs-release" pubkey; }
-sign() { # key version program out: a release signed with key, as release.sh makes them
-  "$WORK/ibs-release" manifest -version "$2" -platform "linux/$ARCH" "$3" >"$WORK/m.json" &&
+sign() { # key version program out [notes]: a release signed with key, as release.sh makes them
+  "$WORK/ibs-release" manifest -version "$2" -platform "linux/$ARCH" ${5:+-notes "$5"} "$3" >"$WORK/m.json" &&
   openssl pkeyutl -sign -rawin -inkey "$1" -in "$WORK/m.json" -out "$WORK/m.sig" &&
   "$WORK/ibs-release" pack -trust "$(pubkey "$1")" -o "$4" "$3" "$WORK/m.json" "$WORK/m.sig" >/dev/null
 }
 KEY=$(pubkey "$WORK/test.key")
-release() { # version key file
+release() { # version key file [notes]
   (cd "$ROOT" && CGO_ENABLED=0 GOOS=linux GOARCH=$ARCH go build -trimpath -ldflags "-s -w -X ibs/internal/version.Version=$1" -o "$WORK/ibs-$1" ./cmd/ibs) &&
-  sign "$2" "$1" "$WORK/ibs-$1" "$3"
+  sign "$2" "$1" "$WORK/ibs-$1" "$3" "${4:-}"
 }
+printf '### New\n\n- Faster scrubs\n\n### Fixed\n\n- A wrong size in the bucket browser\n' >"$WORK/notes-1.9.0.md"
+release 1.7.0 "$WORK/test.key" "$WORK/rel/ibs-1.7.0.ibsrelease" || exit 1
 release 1.8.0 "$WORK/test.key" "$WORK/rel/ibs-1.8.0.ibsrelease" || exit 1
-release 1.9.0 "$WORK/test.key" "$WORK/gh/ibs-1.9.0-linux-$ARCH.ibsrelease" || exit 1
+release 1.9.0 "$WORK/test.key" "$WORK/gh/ibs-1.9.0-linux-$ARCH.ibsrelease" "$WORK/notes-1.9.0.md" || exit 1
 release 1.9.5-beta1 "$WORK/test.key" "$WORK/gh/ibs-1.9.5-beta1-linux-$ARCH.ibsrelease" || exit 1
 release 1.9.1 "$WORK/other.key" "$WORK/rel/untrusted.ibsrelease" || exit 1
 # 2.0.0 is a program that stops right away.
@@ -46,7 +48,8 @@ printf '#!/bin/sh\necho "2.0.0 is broken"; exit 3\n' >"$WORK/broken"
 sign "$WORK/test.key" 2.0.0 "$WORK/broken" "$WORK/rel/broken.ibsrelease"
 # Sites take 1.9.0 and leave the newer beta alone, unless betas are on.
 printf '[{"tag_name":"v1.9.5-beta1","prerelease":true,"assets":[{"name":"ibs-1.9.5-beta1-linux-%s.ibsrelease","browser_download_url":"http://gh/ibs-1.9.5-beta1-linux-%s.ibsrelease"}]},
-{"tag_name":"v1.9.0","assets":[{"name":"ibs-1.9.0-linux-%s.ibsrelease","browser_download_url":"http://gh/ibs-1.9.0-linux-%s.ibsrelease"}]}]' "$ARCH" "$ARCH" "$ARCH" "$ARCH" >"$WORK/gh/latest"
+{"tag_name":"v1.9.0","assets":[{"name":"ibs-1.9.0-linux-%s.ibsrelease","browser_download_url":"http://gh/ibs-1.9.0-linux-%s.ibsrelease"}]},
+{"tag_name":"v1.8.0","body":"### Fixed\\n\\n- Notes from GitHub","assets":[]}]' "$ARCH" "$ARCH" "$ARCH" "$ARCH" >"$WORK/gh/latest"
 chmod -R a+rX "$WORK"
 docker build -q -t ibs-launcher --target launcher "$ROOT" >/dev/null || exit 1
 
@@ -150,5 +153,22 @@ site $ID-e site-e
 check "site-e starts on 1.8.0"                  wait_for 60 running $ID-e 1.8.0
 check "it turns on automatic installs"          bash -c "api $ID-e PUT /api/updates/settings '{\"auto_install\":true}' | grep -q '\"auto_install\":true'"
 check "and moves to 1.9.0 by itself"            wait_for 90 running $ID-e 1.9.0
+
+echo "Release notes"
+notes() { api $1 GET /api/updates | python3 -c 'import json,sys; print(next(v["notes"] for v in json.load(sys.stdin)["versions"] if v["version"]==sys.argv[1]))' "$2"; }
+export -f notes
+check "1.9.0 shows the notes signed into it"    bash -c "notes $ID-e 1.9.0 | grep -q '^- Faster scrubs'"
+check "1.8.0, released without, those on GitHub" wait_for 30 bash -c "notes $ID-e 1.8.0 | grep -q 'Notes from GitHub'"
+
+echo "Removing old versions"
+sleep 9 # let 1.9.0 count as good
+upload $ID-e "$WORK/rel/ibs-1.7.0.ibsrelease" >/dev/null
+old() { api $1 GET /api/updates | python3 -c 'import json,sys; o=json.load(sys.stdin)["old"]; print(",".join(o["remove"]), o.get("keep",""))'; }
+held() { api $1 GET /api/updates | python3 -c 'import json,sys; print(" ".join(sorted(v["version"] for v in json.load(sys.stdin)["versions"])))'; }
+export -f old held
+check "site-e would remove 1.7.0 and keep 1.8.0" bash -c "[ \"\$(old $ID-e)\" = '1.7.0 1.8.0' ]"
+api $ID-e POST /api/updates/remove-old >/dev/null
+check "Remove old versions removes 1.7.0"       bash -c "[ \"\$(held $ID-e)\" = '1.8.0 1.9.0' ]"
+check "nothing old is left to remove"           bash -c "[ \"\$(old $ID-e)\" = ' 1.8.0' ]"
 
 finish

@@ -68,7 +68,9 @@ for arch in $ARCHES; do
   # ~/.config/ibs/signing.key); ibs-release never sees the key, and refuses a
   # signature the built-in key doesn't verify.
   sig=$DIST/sign-$arch && mkdir -p "$sig"
-  go run ./cmd/ibs-release manifest -version "$VERSION" -platform "linux/$arch" "$stage/ibs" >"$sig/manifest.json"
+  # The release notes travel inside the signed release, so every site can show them.
+  sed -n "/^## $VERSION\$/,/^## /p" CHANGELOG.md | sed '1d;$d' >"$sig/notes.md"
+  go run ./cmd/ibs-release manifest -version "$VERSION" -platform "linux/$arch" -notes "$sig/notes.md" "$stage/ibs" >"$sig/manifest.json"
   openssl pkeyutl -sign -rawin -inkey "$SIGNING_KEY" -in "$sig/manifest.json" -out "$sig/manifest.sig"
   go run ./cmd/ibs-release pack -o "$DIST/$name.ibsrelease" "$stage/ibs" "$sig/manifest.json" "$sig/manifest.sig"
   rm -rf "$sig"

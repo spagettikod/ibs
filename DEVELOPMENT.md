@@ -140,6 +140,8 @@ would misread the data or weaken what it means, like ignoring access key limits.
    **Works with** (the launcher and relay versions this release needs or supports).
    Launcher and relay notes have a **Works with** line too, naming IBS versions, which
    `release-image.sh` checks for.
+   The changes follow under `### New` and `### Fixed`, one short bullet each. The notes
+   go into the signed release, and the Updates page shows them under **Release notes**.
 2. Tag and push: `git tag -a v<version> -m "IBS <version>" && git push origin main v<version>`.
 3. Build and publish:
 

@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useRef, useState } from 'react'
 import { api, Bucket, ObjectInfo, StorableCapacity } from '../api'
 import { subscribe } from '../events'
-import { Card, Counted, Empty, ErrorBox, fmtBytes, fmtDate, Spinner, useLoader } from '../ui'
+import { ask, Card, Counted, Empty, ErrorBox, fmtBytes, fmtDate, Spinner, tell, useLoader } from '../ui'
 
 function route(): { bucket?: string; prefix: string } {
   const parts = window.location.hash.replace(/^#\/?/, '').split('/')
@@ -42,12 +42,12 @@ function BucketList() {
     }
   }
   const remove = async (b: Bucket) => {
-    if (!confirm(`Delete bucket "${b.name}"? It must be empty.`)) return
+    if (!(await ask(`Delete bucket ${b.name}`, 'The bucket must be empty.', { ok: 'Delete', danger: true }))) return
     try {
       await api('DELETE', `/api/buckets/${encodeURIComponent(b.name)}`)
       reload()
     } catch (err) {
-      alert((err as Error).message)
+      tell("Couldn't delete the bucket", (err as Error).message)
     }
   }
 
@@ -227,8 +227,8 @@ function Browser({ bucket, prefix }: { bucket: string; prefix: string }) {
   }
 
   const remove = async (o: ObjectInfo) => {
-    if (!confirm(`Delete "${o.key}"? It is deleted here and on every other site, and can't be brought back.`)) return
-    await api('DELETE', `/api/buckets/${encodeURIComponent(bucket)}/objects?key=${encodeURIComponent(o.key)}`).catch((e) => alert(e.message))
+    if (!(await ask(`Delete ${o.key.slice(prefix.length)}`, "It is deleted here and on every other site, and can't be brought back.", { ok: 'Delete', danger: true }))) return
+    await api('DELETE', `/api/buckets/${encodeURIComponent(bucket)}/objects?key=${encodeURIComponent(o.key)}`).catch((e) => tell("Couldn't delete the file", e.message))
     reload()
   }
 
@@ -236,11 +236,12 @@ function Browser({ bucket, prefix }: { bucket: string; prefix: string }) {
     const base = `/api/buckets/${encodeURIComponent(bucket)}/folder?prefix=${encodeURIComponent(p)}`
     try {
       const size = await api<{ objects: number; bytes: number }>('GET', base)
-      if (!confirm(`Delete the folder "${p.slice(prefix.length)}" with ${size.objects.toLocaleString()} ${size.objects === 1 ? 'file' : 'files'} (${fmtBytes(size.bytes)})?\n\n` +
-        'They are deleted here and on every other site, and can\'t be brought back.')) return
+      if (!(await ask(`Delete folder ${p.slice(prefix.length)}`,
+        `It holds ${size.objects.toLocaleString()} ${size.objects === 1 ? 'file' : 'files'} (${fmtBytes(size.bytes)}). ` +
+        "They are deleted here and on every other site, and can't be brought back.", { ok: 'Delete', danger: true }))) return
       await api('DELETE', base)
     } catch (e) {
-      alert((e as Error).message)
+      tell("Couldn't delete the folder", (e as Error).message)
     }
     reload()
   }

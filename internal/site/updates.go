@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"slices"
+	"strings"
 	"strconv"
 	"sync"
 	"time"
@@ -210,6 +211,7 @@ type VersionInfo struct {
 	Newer    bool     `json:"newer"`   // newer than the one running
 	Beta     bool     `json:"beta"`
 	Blocker  string   `json:"blocker"` // why it can't be run here, if so
+	Notes    string   `json:"notes"`   // what changed (Markdown), from the release or GitHub
 	Sites    []string `json:"sites"`   // other sites that run it
 }
 
@@ -238,6 +240,7 @@ type UpdatesInfo struct {
 	LauncherVersion string        `json:"launcher_version,omitempty"`
 	GitHub          bool          `json:"github"`
 	GitHubChecked   int64         `json:"github_checked,omitempty"`
+	Old             OldVersions   `json:"old"`
 	GitHubError     string        `json:"github_error,omitempty"`
 	Versions        []VersionInfo `json:"versions"`
 	Seen            []SeenVersion `json:"seen"`
@@ -271,12 +274,18 @@ func (s *Site) Updates() UpdatesInfo {
 			running[n.Version] = append(running[n.Version], n.Name)
 		}
 	}
+	// Notes of versions released before the release file carried them.
+	var ghNotes map[string]string
+	json.Unmarshal([]byte(s.Setting("github_notes")), &ghNotes)
 	held := map[string]bool{}
 	for _, in := range s.store().List(keys) {
 		held[in.Version] = true
 		v := VersionInfo{Version: in.Version, KeyID: in.KeyID, KeyName: names[in.KeyID], Released: in.Released,
 			Current: in.Version == version.Version, Bad: in.Bad, Newer: release.Compare(in.Version, version.Version) > 0, Beta: release.Prerelease(in.Version),
-			Sites: running[in.Version]}
+			Sites: running[in.Version], Notes: in.Notes}
+		if v.Notes == "" {
+			v.Notes = ghNotes[in.Version]
+		}
 		if !v.Current {
 			v.Blocker = s.compatBlocker(in.Manifest)
 		}
@@ -309,7 +318,60 @@ func (s *Site) Updates() UpdatesInfo {
 		}
 	}
 	slices.SortFunc(info.Seen, func(a, b SeenVersion) int { return release.Compare(b.Version, a.Version) })
+	info.Old = s.oldVersions()
 	return info
+}
+
+// OldVersions is what "Remove old versions" does: the versions older than
+// the running one that go, the newest one this site can roll back to, which
+// stays, and while the running version is on probation, the one the
+// launcher goes back to if it fails, which stays too.
+type OldVersions struct {
+	Remove   []string `json:"remove"`
+	Keep     string   `json:"keep,omitempty"`
+	Fallback string   `json:"fallback,omitempty"`
+}
+
+func (s *Site) oldVersions() OldVersions {
+	st := s.store()
+	p := OldVersions{Remove: []string{}}
+	if g := st.Good(); UnderLauncher() && g != "" && g != version.Version {
+		p.Fallback = g
+	}
+	var older []release.Installed
+	for _, in := range st.List(st.Keys()) {
+		if release.Compare(in.Version, version.Version) < 0 {
+			older = append(older, in)
+		}
+	}
+	slices.SortFunc(older, func(a, b release.Installed) int { return release.Compare(b.Version, a.Version) })
+	for _, in := range older {
+		if !in.Bad && s.compatBlocker(in.Manifest) == "" {
+			p.Keep = in.Version
+			break
+		}
+	}
+	for _, in := range older {
+		if in.Version != p.Keep && in.Version != p.Fallback {
+			p.Remove = append(p.Remove, in.Version)
+		}
+	}
+	return p
+}
+
+// RemoveOldVersions removes the versions oldVersions lists.
+func (s *Site) RemoveOldVersions() (OldVersions, error) {
+	p := s.oldVersions()
+	for _, v := range p.Remove {
+		if err := s.store().Remove(v); err != nil {
+			return p, fmt.Errorf("remove %s: %w", v, err)
+		}
+	}
+	if len(p.Remove) > 0 {
+		s.log.Info("removed old versions", "versions", strings.Join(p.Remove, ", "), "kept", p.Keep)
+		s.notify(TopicPeers)
+	}
+	return p, nil
 }
 
 // SetGitHubChecks turns looking for new versions on GitHub on or off.
@@ -617,6 +679,11 @@ func (s *Site) checkGitHub(ctx context.Context) {
 		resp.Body.Close()
 		if err != nil {
 			return err
+		}
+		if notes := release.GitHubNotes(body); len(notes) > 0 {
+			if b, err := json.Marshal(notes); err == nil {
+				db.SetSetting(s.DB, "github_notes", string(b))
+			}
 		}
 		rel, err := release.PickGitHubRelease(body, s.Betas())
 		if errors.Is(err, release.ErrNoRelease) {

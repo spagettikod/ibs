@@ -303,6 +303,14 @@ func (s *Server) routes() {
 		w.WriteHeader(http.StatusNoContent)
 		return nil
 	}))
+	m.HandleFunc("POST /api/updates/remove-old", a(func(w http.ResponseWriter, r *http.Request, st *site.Site) error {
+		p, err := st.RemoveOldVersions()
+		if err != nil {
+			return badRequest(err.Error())
+		}
+		writeJSON(w, p)
+		return nil
+	}))
 	m.HandleFunc("POST /api/updates/upload", a(func(w http.ResponseWriter, r *http.Request, st *site.Site) error {
 		r.Body = http.MaxBytesReader(w, r.Body, release.MaxSize)
 		f, _, err := r.FormFile("file")

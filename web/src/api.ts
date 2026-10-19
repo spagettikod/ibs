@@ -139,12 +139,14 @@ export type DNSProvider = { code: string; name: string; docs: string; credential
 export type VersionInfo = {
   version: string; key_id: string; key_name: string; released: number
   current: boolean; bad: boolean; newer: boolean; beta: boolean; blocker: string; sites: string[] | null
+  notes: string // what changed, Markdown; empty when unknown
 }
 export type SeenVersion = { version: string; sites: string[]; trusted: boolean; error?: string }
 export type ReleaseKey = { id: string; name: string; key: string; default: boolean; env: boolean; signed: string[] }
 export type UpdatesInfo = {
   running: string; launcher: boolean; launcher_version?: string; github: boolean; betas: boolean; auto_install: boolean; check_minutes: number; github_checked?: number; github_error?: string
   versions: VersionInfo[]; seen: SeenVersion[]; keys: ReleaseKey[]; newer: string
+  old: { remove: string[]; keep?: string; fallback?: string } // what Remove old versions does
 }
 
 export type Scrub = {

@@ -28,6 +28,30 @@ func Prerelease(v string) bool { return !IsVersion(v) || strings.Contains(v, "-"
 // ErrNoRelease means GitHub lists no release that fits.
 var ErrNoRelease = errors.New("no release found")
 
+// GitHubNotes returns the release notes of each release in GitHub's answer,
+// by version: for versions released before the notes were in the release file.
+func GitHubNotes(body []byte) map[string]string {
+	type ghRelease struct {
+		TagName string `json:"tag_name"`
+		Body    string `json:"body"`
+	}
+	var list []ghRelease
+	if json.Unmarshal(body, &list) != nil {
+		var one ghRelease
+		if json.Unmarshal(body, &one) != nil {
+			return nil
+		}
+		list = []ghRelease{one}
+	}
+	out := map[string]string{}
+	for _, r := range list {
+		if v := strings.TrimPrefix(r.TagName, "v"); IsVersion(v) && strings.TrimSpace(r.Body) != "" {
+			out[v] = strings.TrimSpace(r.Body)
+		}
+	}
+	return out
+}
+
 // GitHubRelease is a release found on GitHub.
 type GitHubRelease struct {
 	Version  string

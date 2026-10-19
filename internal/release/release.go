@@ -38,6 +38,7 @@ type Manifest struct {
 	MinCompatible string `json:"min_compatible"` // oldest IBS version this one works with
 	DBLevel       int    `json:"db_level"`       // database changes it knows; it can't run on a database changed further
 	Released      int64  `json:"released"`       // unix time
+	Notes         string `json:"notes,omitempty"` // what changed, from the changelog (Markdown)
 }
 
 // Key is a public key that signs releases.

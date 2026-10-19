@@ -2,7 +2,7 @@ import { FormEvent, useState } from 'react'
 import { api, NodeInfo } from '../api'
 
 type JoinToken = { token: string; address: string; configured_address: string }
-import { ago, Card, Copy, Counted, ErrorBox, fmtBytes, Meter, Modal, Status, useLoader, useTick, Version } from '../ui'
+import { ago, ask, Card, Copy, Counted, ErrorBox, fmtBytes, Meter, Modal, Status, tell, useLoader, useTick, Version } from '../ui'
 
 export default function NodesPage() {
   const { data, error, reload } = useLoader(() => api<NodeInfo[]>('GET', '/api/nodes'), ['nodes', 'replication', 'data'])
@@ -11,13 +11,13 @@ export default function NodesPage() {
   const [editing, setEditing] = useState<NodeInfo>()
 
   const rotate = async () => {
-    if (!confirm('Create a new join token? The old token stops working for new nodes. Nodes that already joined keep working.')) return
+    if (!(await ask('New join token', 'The old token stops working for new nodes. Nodes that already joined keep working.', { ok: 'Create token' }))) return
     await api('POST', '/api/nodes/join-token')
     token.reload()
   }
   const remove = async (n: NodeInfo) => {
-    if (!confirm(`Remove node "${n.name}"? Blocks stored on it are fetched back from the copies on other sites; blocks not copied yet are lost.`)) return
-    await api('DELETE', `/api/nodes/${n.id}`).catch((e) => alert(e.message))
+    if (!(await ask(`Remove node ${n.name}`, 'Blocks stored on it are fetched back from the copies on other sites; blocks not copied to other sites yet are lost.', { ok: 'Remove', danger: true }))) return
+    await api('DELETE', `/api/nodes/${n.id}`).catch((e) => tell("Couldn't remove the node", e.message))
     reload()
   }
 
@@ -152,7 +152,8 @@ function LimitDialog({ node, onClose, onSaved }: { node: NodeInfo; onClose: () =
   const [busy, setBusy] = useState(false)
   const save = async (e: FormEvent) => {
     e.preventDefault()
-    if (mode === 'nothing' && node.blocks > 0 && !confirm(`Move the ${node.blocks} blocks on ${node.name} to other nodes? Make sure they have room.`)) return
+    if (mode === 'nothing' && node.blocks > 0 &&
+      !(await ask(`Move blocks off ${node.name}`, `Its ${node.blocks.toLocaleString()} blocks move to the other nodes. Make sure they have room.`, { ok: 'Move them' }))) return
     setBusy(true)
     setError(undefined)
     try {
