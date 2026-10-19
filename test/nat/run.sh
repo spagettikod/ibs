@@ -8,7 +8,7 @@ if [ "$MODE" = symmetric ]; then export NAT_FLAGS=--random-fully; fi
 dc() { docker compose -p ibs-nat "$@"; }
 api() { # site-ip method path [json]
   local jar=/tmp/jar-$1
-  dc exec -T ctl sh -c "[ -s $jar ] || curl -s -c $jar -H 'Content-Type: application/json' -d '{\"password\":\"changeme123\"}' http://$1:8080/api/login >/dev/null;
+  dc exec -T ctl sh -c "grep -qs ibs_session $jar || curl -s -c $jar -H 'Content-Type: application/json' -d '{\"password\":\"changeme123\"}' http://$1:8080/api/login >/dev/null;
     curl -s -b $jar -X $2 -H 'X-IBS: 1' -H 'Content-Type: application/json' ${4:+-d '$4'} http://$1:8080$3"
 }
 dc down -v --remove-orphans >/dev/null 2>&1 || true

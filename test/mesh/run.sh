@@ -13,7 +13,7 @@ cd "$(dirname "$0")"
 dc() { docker compose -p ibs-mesh "$@"; }
 api() { # site method path [json]
   local jar=/tmp/jar-$1
-  dc exec -T ctl sh -c "[ -s $jar ] || curl -s -c $jar -H 'Content-Type: application/json' -d '{\"password\":\"changeme123\"}' http://$1:8080/api/login >/dev/null;
+  dc exec -T ctl sh -c "grep -qs ibs_session $jar || curl -s -c $jar -H 'Content-Type: application/json' -d '{\"password\":\"changeme123\"}' http://$1:8080/api/login >/dev/null;
     curl -s -b $jar -X $2 -H 'X-IBS: 1' -H 'Content-Type: application/json' ${4:+-d '$4'} http://$1:8080$3"
 }
 peer_of() { # site other: is other an online peer of site?

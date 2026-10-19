@@ -67,7 +67,7 @@ site $ID-b site-b -e IBS_RELEASES_URL=http://nowhere.invalid/latest
 port() { docker port $1 8080/tcp | head -1 | cut -d: -f2; }
 api() { # container method path [json]
   local p jar="$WORK/jar-$1"; p=$(port $1)
-  [ -s "$jar" ] || curl -s -c "$jar" -H 'Content-Type: application/json' -d '{"password":"test-password"}' "http://127.0.0.1:$p/api/login" >/dev/null
+  grep -qs ibs_session "$jar" || curl -s -c "$jar" -H 'Content-Type: application/json' -d '{"password":"test-password"}' "http://127.0.0.1:$p/api/login" >/dev/null
   curl -s -b "$jar" -X "$2" -H 'X-IBS: 1' -H 'Content-Type: application/json' ${4:+-d "$4"} "http://127.0.0.1:$p$3"
 }
 upload() { local p; p=$(port $1); curl -s -b "$WORK/jar-$1" -H 'X-IBS: 1' -F "file=@$2" "http://127.0.0.1:$p/api/updates/upload"; }

@@ -33,7 +33,7 @@ site $ID-c site-c -e IBS_SCRUB_RATE=1M # slow with its own 50 MB, to pause and s
 port() { docker port $1 8080/tcp | head -1 | cut -d: -f2; }
 api() { # container method path [json]
   local p jar="$WORK/jar-$1"; p=$(port $1)
-  [ -s "$jar" ] || curl -s -c "$jar" -H 'Content-Type: application/json' -d '{"password":"test-password"}' "http://127.0.0.1:$p/api/login" >/dev/null
+  grep -qs ibs_session "$jar" || curl -s -c "$jar" -H 'Content-Type: application/json' -d '{"password":"test-password"}' "http://127.0.0.1:$p/api/login" >/dev/null
   curl -s -b "$jar" -X "$2" -H 'X-IBS: 1' -H 'Content-Type: application/json' ${4:+-d "$4"} "http://127.0.0.1:$p$3"
 }
 wait_for() { local t=$1; shift; for _ in $(seq 1 "$t"); do "$@" && return 0; sleep 1; done; return 1; }
