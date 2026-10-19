@@ -109,6 +109,8 @@ function Shell({ state, onLogout }: { state: State; onLogout: () => void }) {
   const [page, setPage] = useState<PageId>(currentPage)
   const [, setHash] = useState(window.location.hash) // re-render for submenu changes
   const [menuOpen, setMenuOpen] = useState(false)
+  // In the phone menu, Settings unfolds its sections instead of opening one.
+  const [unfolded, setUnfolded] = useState(false)
   useEffect(() => {
     const onHash = () => { setPage(currentPage()); setHash(window.location.hash) }
     window.addEventListener('hashchange', onHash)
@@ -128,22 +130,31 @@ function Shell({ state, onLogout }: { state: State; onLogout: () => void }) {
       <aside className={`sidebar ${menuOpen ? 'open' : ''}`}>
         <div className="sidebar-top">
           <Logo size={48} stacked />
-          <button className="btn small menu-toggle" onClick={() => setMenuOpen(!menuOpen)}>Menu</button>
+          <button className="btn small menu-toggle" onClick={() => { setMenuOpen(!menuOpen); setUnfolded(false) }}>Menu</button>
         </div>
         <div className="site-name" title={state.site_id}><small>Site</small>{state.site_name}</div>
         <nav>
           {(Object.keys(pages) as PageId[]).map((id) => (
             <Fragment key={id}>
-              <a href={`#/${id}`} className={id === page ? 'active' : ''} onClick={() => setMenuOpen(false)}>
+              <a href={`#/${id}`} className={id === page ? 'active' : ''} aria-expanded={id === 'settings' && menuOpen ? unfolded || page === 'settings' : undefined}
+                onClick={(e) => {
+                  if (id === 'settings' && menuOpen) {
+                    e.preventDefault() // the menu is open on a phone: show the sections to choose from
+                    setUnfolded(!unfolded)
+                    return
+                  }
+                  setMenuOpen(false)
+                }}>
                 {pages[id].label}
                 {id === 'settings' && updates.data?.newer && <span className="attention" title={`IBS ${updates.data.newer} is available`} />}
                 {id === 'scrub' && (scrub.data?.unresolved ?? 0) > 0 && <span className="attention bad" title="The scrub found problems it couldn't repair" />}
+                {id === 'settings' && menuOpen && <span className="unfold" aria-hidden>{unfolded || page === 'settings' ? '▴' : '▾'}</span>}
               </a>
-              {id === 'settings' && page === 'settings' && (
+              {id === 'settings' && (page === 'settings' || (menuOpen && unfolded)) && (
                 <div className="subnav">
                   {SETTINGS_SECTIONS.map((s) => (
-                    <a key={s.id} href={`#/settings/${s.id}`} className={s.id === settingsSection() ? 'active' : ''}
-                      onClick={() => setMenuOpen(false)}>
+                    <a key={s.id} href={`#/settings/${s.id}`} className={page === 'settings' && s.id === settingsSection() ? 'active' : ''}
+                      onClick={() => { setMenuOpen(false); setUnfolded(false) }}>
                       {s.label}
                       {s.id === 'updates' && updates.data?.newer && <span className="attention" />}
                     </a>

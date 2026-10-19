@@ -3,6 +3,13 @@
 Each release says what to update and which launcher and relay it works with: IBS,
 the launcher and the relay are released separately.
 
+## Unreleased
+
+### Fixed
+
+- **On a phone, Settings** opened General right away; it now unfolds its sections in the
+  menu to choose from, as on a computer.
+
 ## 1.8.7
 
 **What to update:** sites, under **Settings → Updates**; nodes follow.

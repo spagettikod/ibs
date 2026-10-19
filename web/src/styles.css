@@ -360,3 +360,4 @@ label.check input { width: auto; margin-top: 3px; }
 .release-notes h3 { margin: 6px 0 0; font-size: 14px; }
 .release-notes ul { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }
 .release-notes p { margin: 0; }
+.sidebar nav a .unfold { margin-left: auto; opacity: 0.7; }
