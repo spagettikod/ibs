@@ -3,7 +3,13 @@
 Each release says what to update and which launcher and relay it works with: IBS,
 the launcher and the relay are released separately.
 
-## Unreleased
+## 1.8.5
+
+**What to update:** the relay to 1.6.0 first (pull the new image, keep `/data`), then
+sites under **Settings → Updates**; nodes follow.
+
+**Works with:** launcher 1.0.0 or newer (1.1.0 recommended), relay 1.2.0 or newer (1.6.0
+to join through a relay with the new long invites).
 
 ### New
 
@@ -13,6 +19,11 @@ the launcher and the relay are released separately.
   1.8.5 can't read the new invites; through a relay it needs relay 1.6.0.
 - **Restoring a site is faster:** files come back from the other sites four blocks at a
   time, one batch after another, instead of one block at a time every few seconds.
+
+### Fixed
+
+- **Room for your files** during a restore says how much is still coming back in its
+  one line (was a line of its own).
 
 ## 1.8.4
 
