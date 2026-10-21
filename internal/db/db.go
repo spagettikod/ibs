@@ -279,6 +279,10 @@ type migration struct {
 	Breaks string
 }
 
+// sharedBlocks: an older version would read a file in a shared block as the
+// whole block and fail.
+const sharedBlocks = "small files sharing blocks, which an older version can't read"
+
 // limitedKeys: an older version would ignore an access key's limits.
 const limitedKeys = "limited access keys, which an older version would give full access"
 
@@ -329,6 +333,34 @@ var migrations = []migration{
 	// Access key permissions: full | read, and the buckets ('' = all; else a JSON list).
 	{SQL: `ALTER TABLE access_keys ADD COLUMN access TEXT NOT NULL DEFAULT 'full'`, Breaks: limitedKeys},
 	{SQL: `ALTER TABLE access_keys ADD COLUMN buckets TEXT NOT NULL DEFAULT ''`, Breaks: limitedKeys},
+	// Small files share blocks (sharedblocks.go): shared marks a block holding
+	// pieces of several files, dead counts bytes of deleted ones, file is the
+	// key of the file a block of one file belongs to.
+	{SQL: `ALTER TABLE blocks ADD COLUMN shared INTEGER NOT NULL DEFAULT 0`, Breaks: sharedBlocks},
+	{SQL: `ALTER TABLE blocks ADD COLUMN dead INTEGER NOT NULL DEFAULT 0`},
+	{SQL: `ALTER TABLE blocks ADD COLUMN file TEXT NOT NULL DEFAULT ''`},
+	{SQL: `CREATE INDEX IF NOT EXISTS blocks_small ON blocks(bucket, size) WHERE shared = 0`},
+	{SQL: `CREATE INDEX IF NOT EXISTS blocks_new ON blocks(touched) WHERE shared = 0`},
+	// The files in shared blocks: each piece (its hash) and who uses it.
+	{SQL: `CREATE TABLE IF NOT EXISTS pieces (
+		piece  TEXT PRIMARY KEY,
+		block  TEXT NOT NULL,
+		bucket TEXT NOT NULL,
+		key    TEXT NOT NULL
+	)`},
+	{SQL: `CREATE INDEX IF NOT EXISTS pieces_block ON pieces(block)`},
+	// The largest block each other site accepts as a copy (0: from before
+	// large blocks).
+	{SQL: `ALTER TABLE peers ADD COLUMN max_block INTEGER NOT NULL DEFAULT 0`},
+	// Shared blocks written by cleanup, waiting for their copies on other
+	// sites before files move into them.
+	{SQL: `CREATE TABLE IF NOT EXISTS block_moves (
+		block   TEXT PRIMARY KEY,
+		bucket  TEXT NOT NULL,
+		created INTEGER NOT NULL,
+		target  INTEGER NOT NULL,
+		moves   TEXT NOT NULL
+	)`},
 }
 
 // BreakingSince says why a version that knows the first known changes can't

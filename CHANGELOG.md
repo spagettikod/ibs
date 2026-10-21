@@ -3,6 +3,21 @@
 Each release says what to update and which launcher and relay it works with: IBS,
 the launcher and the relay are released separately.
 
+## Unreleased
+
+### New
+
+- **Small files share blocks:** small files are stored together in 4 MB blocks, each
+  encrypted on its own, and copied to other sites once per block. A site with many small
+  files has far fewer blocks, so copying, restoring and scrubbing go faster and use less
+  disk on all three sites. Existing sites move their small files over by themselves, in
+  the background, at most `IBS_CLEANUP_RATE` (default 20 MB/s).
+- **Deleting a file in a shared block** frees its space when the block is rewritten,
+  once it's half empty.
+- **Large files:** a file's blocks after its first GB are 16 MB, once every other site
+  runs 1.9.0 or newer.
+- Storage nodes read only the part of a block a file needs.
+
 ## 1.8.8
 
 **What to update:** sites, under **Settings → Updates**; nodes follow.

@@ -89,6 +89,10 @@ type Site struct {
 	scrubLimit byteLimiter
 	// rebuildLimit keeps re-creating copies of a gone site to IBS_REBUILD_RATE.
 	rebuildLimit byteLimiter
+	// cleanupLimit keeps rewriting shared blocks to IBS_CLEANUP_RATE.
+	cleanupLimit byteLimiter
+	nextCleanup  time.Time    // sharedBlocksOnce only
+	lastDueCheck time.Time    // sharedBlocksOnce only
 	roomMu       sync.Mutex   // one makeRoom at a time
 	noRoom       atomic.Int64 // blocks no site had room for at the last replication run
 	// replCursor: the last block of the previous replication batch (replicateOnce only).
@@ -331,6 +335,8 @@ func (s *Site) Run(ctx context.Context) {
 	every(scanEvery, "trim", s.trimOnce)
 	every(iv, "gc", s.collectGarbage)
 	every(iv, "heal", s.healOnce)
+	every(time.Second, "shared-blocks", s.sharedBlocksOnce)
+	go s.fillBlockFiles(ctx)
 	every(iv, "drain", s.drainOnce)
 	every(12*iv, "releases", s.fetchReleases) // a minute by default
 	every(3*iv, "backup", s.backupOnce)

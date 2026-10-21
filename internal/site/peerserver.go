@@ -220,7 +220,7 @@ func (s *Site) handlePutHeld(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid block id", http.StatusBadRequest)
 		return
 	}
-	data, err := io.ReadAll(io.LimitReader(r.Body, blockcodec.BlockSize+1024))
+	data, err := io.ReadAll(io.LimitReader(r.Body, blockcodec.LargeBlockSize+1024))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return

@@ -296,6 +296,7 @@ Environment variables. All are optional.
 | `IBS_RELAY_ADDRESS` | | Relay to register with on start |
 | `IBS_RELAY_TOKEN` | | Token of that relay |
 | `IBS_REBUILD_RATE` | `20M` | How fast copies of an offline site are re-created, per second |
+| `IBS_CLEANUP_RATE` | `20M` | How fast blocks with space from deleted small files are rewritten, per second; `0` turns it off |
 | `IBS_RELAY_TOKEN_FILE` | | Read the relay token from a file |
 | `IBS_ROOM_COOLDOWN` | `1h` | After pushing other sites' copies away for its own files, how long a site takes no new copies |
 | `IBS_RELEASES_URL` | GitHub | Where to look for new releases |
@@ -351,16 +352,17 @@ Environment variables. All are optional.
 
 ## How your data is protected
 
-- **Encrypted before it's stored.** Files are split into 4 MiB blocks, and each block is
-  encrypted (AES-256-GCM) with its bucket's key. That happens before anything is
+- **Encrypted before it's stored.** Files are split into 4 MiB blocks (16 MiB after a
+  file's first GiB), and each is encrypted (AES-256-GCM) with its bucket's key. Small
+  files share blocks, each encrypted on its own, so many small files don't mean many
+  blocks. That happens before anything is
   written, locally or elsewhere. Nodes, other sites and relays only ever see encrypted
   blocks. They can check that a block is intact, but they can't read it.
 - **One recovery phrase.** Creating a site shows a recovery phrase once. All of the
   site's keys come from it. With the phrase you can rebuild a lost site; without it,
   nobody can, including you. Keep it offline.
 - **Every file exists three times.** One copy at your site and one on each of two other
-  sites, never two on the same site. Each file has its own blocks; IBS doesn't share
-  blocks between files. An upload is confirmed once it's stored at your
+  sites, never two on the same site. An upload is confirmed once it's stored at your
   site, and the copies follow within seconds. The web interface shows what's still being
   copied. With fewer than two other sites online, files get as many copies as there are
   sites, and the rest follow when more sites are available.

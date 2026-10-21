@@ -36,9 +36,26 @@ var (
 // files have as many copies as there are sites, and the rest follow.
 const Copies = 2
 
+// BlockRef is one block of a file, or its piece of a shared block: Off and
+// Len say where in the block, Piece is the piece's hash (sharedblocks.go).
 type BlockRef struct {
-	ID   string `json:"id"`
-	Size int64  `json:"size"` // plaintext bytes
+	ID    string `json:"id"`
+	Size  int64  `json:"size"` // plaintext bytes
+	Off   int64  `json:"off,omitempty"`
+	Len   int64  `json:"len,omitempty"`
+	Piece string `json:"piece,omitempty"`
+}
+
+// shared reports whether the file's part is a piece of a shared block.
+func (b BlockRef) shared() bool { return b.Len > 0 }
+
+// identity is what stays the same when a piece moves to another block: the
+// piece's hash, or the block's ID for a block of its own.
+func (b BlockRef) identity() string {
+	if b.Piece != "" {
+		return b.Piece
+	}
+	return b.ID
 }
 
 type ObjectInfo struct {
@@ -122,7 +139,7 @@ func (s *Site) DeleteBucket(name string) error {
 	}
 	rows.Close()
 	for _, b := range partBlocks {
-		if err := adjustRefs(tx, decodeBlocks(b), -1); err != nil {
+		if err := adjustRefs(tx, decodeBlocks(b), -1, ""); err != nil {
 			return err
 		}
 	}
@@ -211,13 +228,18 @@ type writeResult struct {
 // The blocks belong to the upload (res.upload) until they're committed with
 // commitBlocks or given up with releaseUpload; on an error they're given up
 // here.
-func (s *Site) writeBlocks(ctx context.Context, bucket string, r io.Reader) (res *writeResult, err error) {
+//
+// before is how much of the file came before this stream (earlier parts of
+// a multipart upload): blocks after a file's first LargeAfter bytes are
+// LargeBlockSize, once every other site accepts those.
+func (s *Site) writeBlocks(ctx context.Context, bucket string, r io.Reader, before int64) (res *writeResult, err error) {
 	key, err := s.bucketKey(bucket)
 	if err != nil {
 		return nil, err
 	}
 	h := md5.New()
 	buf := make([]byte, blockcodec.BlockSize)
+	large := s.largeBlocksOK()
 	upload := keys.RandomToken(12)
 	res = &writeResult{upload: upload}
 	defer func() {
@@ -226,6 +248,9 @@ func (s *Site) writeBlocks(ctx context.Context, bucket string, r io.Reader) (res
 		}
 	}()
 	for {
+		if large && len(buf) < blockcodec.LargeBlockSize && before+res.size >= largeAfter {
+			buf = make([]byte, blockcodec.LargeBlockSize)
+		}
 		n, err := io.ReadFull(r, buf)
 		if n > 0 {
 			plain := buf[:n]
@@ -254,11 +279,25 @@ func (s *Site) writeBlocks(ctx context.Context, bucket string, r io.Reader) (res
 var errBlockGone = errors.New("a block of this upload is missing; nothing was stored, try again")
 
 // adjustRefs adds delta references to blocks. Taking a reference (delta > 0)
-// also ends the blocks' upload, and requires every block to exist.
-func adjustRefs(tx *sql.Tx, blocks []BlockRef, delta int) error {
+// also ends the blocks' upload, records the file (key) a block belongs to,
+// and requires every block to exist. Giving up a piece of a shared block
+// counts its bytes as dead there.
+func adjustRefs(tx *sql.Tx, blocks []BlockRef, delta int, key string) error {
 	for _, b := range blocks {
-		res, err := tx.Exec(`UPDATE blocks SET refs = refs + ?, upload = CASE WHEN ? > 0 THEN '' ELSE upload END WHERE id = ?`,
-			delta, delta, b.ID)
+		var res sql.Result
+		var err error
+		switch {
+		case b.shared() && delta < 0:
+			if res, err = tx.Exec(`UPDATE blocks SET refs = refs + ?, dead = dead + ? WHERE id = ?`, delta, b.Len, b.ID); err == nil {
+				_, err = tx.Exec(`DELETE FROM pieces WHERE piece = ?`, b.Piece)
+			}
+		case delta > 0 && key != "":
+			res, err = tx.Exec(`UPDATE blocks SET refs = refs + ?, upload = '', file = CASE WHEN shared = 0 THEN ? ELSE file END WHERE id = ?`,
+				delta, key, b.ID)
+		default:
+			res, err = tx.Exec(`UPDATE blocks SET refs = refs + ?, upload = CASE WHEN ? > 0 THEN '' ELSE upload END WHERE id = ?`,
+				delta, delta, b.ID)
+		}
 		if err != nil {
 			return err
 		}
@@ -305,11 +344,11 @@ func (s *Site) commitObject(tx *sql.Tx, o *ObjectInfo) error {
 	if exists == 0 {
 		return ErrNoSuchBucket
 	}
-	if err := adjustRefs(tx, o.Blocks, 1); err != nil {
+	if err := adjustRefs(tx, o.Blocks, 1, o.Key); err != nil {
 		return err
 	}
 	if old != "" {
-		if err := adjustRefs(tx, decodeBlocks(old), -1); err != nil {
+		if err := adjustRefs(tx, decodeBlocks(old), -1, ""); err != nil {
 			return err
 		}
 	}
@@ -350,7 +389,7 @@ func (s *Site) PutObject(ctx context.Context, bucket, key string, r io.Reader, c
 	if key == "" || len(key) > 1024 {
 		return nil, errors.New("invalid object key")
 	}
-	wr, err := s.writeBlocks(ctx, bucket, r)
+	wr, err := s.writeBlocks(ctx, bucket, r, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -390,7 +429,7 @@ func (s *Site) DeleteObject(bucket, key string) error {
 		if err := folderDeleted(tx, bucket, key, size); err != nil {
 			return err
 		}
-		return adjustRefs(tx, decodeBlocks(blocks), -1)
+		return adjustRefs(tx, decodeBlocks(blocks), -1, "")
 	})
 }
 
@@ -442,7 +481,7 @@ func (s *Site) DeleteFolder(bucket, prefix string) (int64, error) {
 				if _, err := tx.Exec(`DELETE FROM objects WHERE bucket = ? AND key = ?`, bucket, o.key); err != nil {
 					return err
 				}
-				if err := adjustRefs(tx, decodeBlocks(o.blocks), -1); err != nil {
+				if err := adjustRefs(tx, decodeBlocks(o.blocks), -1, ""); err != nil {
 					return err
 				}
 				if err := folderDeleted(tx, bucket, o.key, o.size); err != nil {
@@ -540,6 +579,16 @@ func (s *Site) WriteObject(ctx context.Context, w io.Writer, o *ObjectInfo, offs
 	fetch := func(p piece) <-chan result {
 		ch := make(chan result, 1)
 		go func() {
+			if p.ref.shared() {
+				ct, err := s.readPiece(ctx, p.ref)
+				if err != nil {
+					ch <- result{err: err}
+					return
+				}
+				plain, err := blockcodec.Decrypt(key, p.ref.Piece, ct)
+				ch <- result{plain, err}
+				return
+			}
 			ct, err := s.readBlock(ctx, p.ref.ID)
 			if err != nil {
 				ch <- result{err: err}
@@ -731,7 +780,9 @@ func (s *Site) UploadPart(ctx context.Context, bucket, key, uploadID string, num
 	}
 	s.uploadActive(uploadID, 1)
 	defer s.uploadActive(uploadID, -1)
-	wr, err := s.writeBlocks(ctx, bucket, r)
+	var before int64 // the other parts so far: a large file's later blocks are large
+	s.DB.QueryRowContext(ctx, `SELECT COALESCE(SUM(size), 0) FROM parts WHERE upload_id = ? AND num != ?`, uploadID, num).Scan(&before)
+	wr, err := s.writeBlocks(ctx, bucket, r, before)
 	if err != nil {
 		return "", err
 	}
@@ -749,11 +800,11 @@ func (s *Site) UploadPart(ctx context.Context, bucket, key, uploadID string, num
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		if err := adjustRefs(tx, wr.blocks, 1); err != nil {
+		if err := adjustRefs(tx, wr.blocks, 1, ""); err != nil { // a part: its file comes when it completes
 			return err
 		}
 		if old != "" {
-			if err := adjustRefs(tx, decodeBlocks(old), -1); err != nil {
+			if err := adjustRefs(tx, decodeBlocks(old), -1, ""); err != nil {
 				return err
 			}
 		}
@@ -864,7 +915,7 @@ func (s *Site) CompleteUpload(bucket, key, uploadID string, parts []CompletePart
 		}
 		// Release the references held by every part, used or not.
 		for _, p := range stored {
-			if err := adjustRefs(tx, decodeBlocks(p.blocks), -1); err != nil {
+			if err := adjustRefs(tx, decodeBlocks(p.blocks), -1, ""); err != nil {
 				return err
 			}
 		}
@@ -897,7 +948,7 @@ func (s *Site) AbortUpload(bucket, key, uploadID string) error {
 		}
 		rows.Close()
 		for _, b := range all {
-			if err := adjustRefs(tx, decodeBlocks(b), -1); err != nil {
+			if err := adjustRefs(tx, decodeBlocks(b), -1, ""); err != nil {
 				return err
 			}
 		}

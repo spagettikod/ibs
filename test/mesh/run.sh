@@ -47,6 +47,10 @@ check "site-b registered with site-c's relay"   wait_for 30 bash -c "$(declare -
 echo "Copies"
 api site-b POST /api/buckets '{"name":"mesh"}' >/dev/null
 dc exec -T ctl sh -c "head -c 300000 /dev/urandom > /tmp/data.bin && curl -s -b /tmp/jar-site-b -H 'X-IBS: 1' -F 'file=@/tmp/data.bin;filename=data.bin' http://site-b:8080/api/buckets/mesh/upload" >/dev/null
+# Small files share a block, which is copied like any other.
+dc exec -T ctl sh -c 'mkdir -p /tmp/small && for i in $(seq 1 30); do head -c $((i * 150 + 100)) /dev/urandom > /tmp/small/s$i.bin; done; \
+  args=""; for f in /tmp/small/*; do args="$args -F file=@$f"; done; \
+  curl -s -b /tmp/jar-site-b -H "X-IBS: 1" $args "http://site-b:8080/api/buckets/mesh/upload?prefix=small/"' >/dev/null
 copies_done() { api site-b GET /api/dashboard | grep -q '"under_replicated":0' && api site-c GET /api/peers | tr '{' '\n' | grep '"name":"site-b"' | grep -qv '"held_blocks":0'; }
 check "copies reach site-a and site-c"          wait_for 60 copies_done
 
@@ -133,6 +137,8 @@ check "and site-b sees site-a"                  wait_for 60 peer_of site-b-new s
 check "its bucket is back"                      bash -c "$(declare -f api dc); api site-b-new GET /api/buckets | grep -q '\"mesh\"'"
 get() { dc exec -T ctl sh -c "curl -sf -b /tmp/jar-site-b-new 'http://site-b-new:8080/api/buckets/mesh/download?key=data.bin' | cmp -s - /tmp/data.bin"; }
 check "and its file, from the copy on site-a"   wait_for 120 get
+smalls() { dc exec -T ctl sh -c 'for i in $(seq 1 30); do curl -sf -b /tmp/jar-site-b-new "http://site-b-new:8080/api/buckets/mesh/download?key=small/s$i.bin" | cmp -s - /tmp/small/s$i.bin || exit 1; done'; }
+check "and its small files, in a shared block"  wait_for 60 smalls
 back() { api site-b-new GET /api/dashboard | grep -q '"missing_locally":0,"missing_bytes":0'; }
 check "nothing is left to fetch back"          wait_for 120 back
 

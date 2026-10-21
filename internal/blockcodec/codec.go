@@ -1,9 +1,10 @@
 // Package blockcodec encrypts file blocks with a bucket key.
 //
 // Every block gets a random GCM nonce, stored at its start, so no two blocks
-// are alike, even of identical data: each file owns its blocks (IBS doesn't
-// deduplicate; the tool that writes backups into it does). A block's ID is the SHA-256 of its ciphertext, which lets any copy be
-// verified without the key.
+// are alike, even of identical data: IBS doesn't deduplicate. A block's ID is
+// the SHA-256 of its ciphertext, which lets any copy be verified without the
+// key. Small files' encrypted blocks are placed one after another in shared
+// blocks (site/sharedblocks.go); each keeps its own nonce and check value.
 package blockcodec
 
 import (
@@ -15,7 +16,13 @@ import (
 	"errors"
 )
 
-const BlockSize = 4 << 20
+// BlockSize is how large blocks are; a file's blocks after its first
+// LargeAfter bytes are LargeBlockSize, once every site accepts those.
+const (
+	BlockSize      = 4 << 20
+	LargeBlockSize = 16 << 20
+	LargeAfter     = 1 << 30
+)
 
 var ErrCorrupt = errors.New("block content does not match its id")
 

@@ -71,6 +71,42 @@ func (r *Remote) Get(ctx context.Context, ns, id string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
+// GetRange asks the node for n bytes at off of a block. A node from before
+// range reads answers with the whole block, which is sliced here.
+func (r *Remote) GetRange(ctx context.Context, ns, id string, off, n int64) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, r.BaseURL+blockPath(ns, id), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", off, off+n-1))
+	resp, err := stall.Do(r.Client, req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusNotFound:
+		return nil, ErrNotFound
+	case http.StatusPartialContent:
+		b, err := io.ReadAll(io.LimitReader(resp.Body, n+1))
+		if err == nil && int64(len(b)) != n {
+			err = fmt.Errorf("block %s: got %d bytes of %d", id, len(b), n)
+		}
+		return b, err
+	}
+	if err := expect(resp, http.StatusOK); err != nil {
+		return nil, err
+	}
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if off+n > int64(len(b)) {
+		return nil, fmt.Errorf("block %s: range %d+%d beyond its %d bytes", id, off, n, len(b))
+	}
+	return b[off : off+n], nil
+}
+
 func (r *Remote) Delete(ctx context.Context, ns, id string) error {
 	resp, err := r.do(ctx, http.MethodDelete, blockPath(ns, id), nil)
 	if err != nil {
@@ -180,6 +216,22 @@ func Handler(store Store, meta *MetaFile) http.Handler {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	mux.HandleFunc("GET /node/v1/blocks/{ns}/{id}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Part of a block ("bytes=off-end"), for a file that shares it.
+		var off, end int64
+		if _, err := fmt.Sscanf(r.Header.Get("Range"), "bytes=%d-%d", &off, &end); err == nil && off >= 0 && end >= off {
+			data, err := GetRange(r.Context(), store, r.PathValue("ns"), r.PathValue("id"), off, end-off+1)
+			if err == ErrNotFound {
+				http.NotFound(w, r)
+				return
+			}
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusRequestedRangeNotSatisfiable)
+				return
+			}
+			w.WriteHeader(http.StatusPartialContent)
+			w.Write(data)
+			return
+		}
 		data, err := store.Get(r.Context(), r.PathValue("ns"), r.PathValue("id"))
 		if err == ErrNotFound {
 			http.NotFound(w, r)

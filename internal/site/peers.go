@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"ibs/internal/blockcodec"
 	"ibs/internal/blockstore"
 	"ibs/internal/db"
 	"ibs/internal/keys"
@@ -161,8 +162,11 @@ type SiteStatus struct {
 	Version        string         `json:"version,omitempty"`
 	// Updates: the oldest version this one works with, and the versions it
 	// holds (other sites may fetch those signed with a key they trust).
-	MinCompatible string       `json:"min_compatible,omitempty"`
-	Releases      []ReleaseRef `json:"releases,omitempty"`
+	MinCompatible string `json:"min_compatible,omitempty"`
+	// MaxBlock: the largest block this site accepts as a copy (absent before
+	// large blocks: BlockSize).
+	MaxBlock int64        `json:"max_block,omitempty"`
+	Releases []ReleaseRef `json:"releases,omitempty"`
 }
 
 func (s *Site) Status() SiteStatus {
@@ -173,6 +177,7 @@ func (s *Site) Status() SiteStatus {
 	st.Routes = s.OwnRoutes()
 	st.Links = s.NetworkLinks()
 	st.RelayTokens = s.relayTokens()
+	st.MaxBlock = blockcodec.LargeBlockSize
 	st.RelayAddresses = s.relayAddresses()
 	st.RelayRemovals = s.relayRemovals()
 	st.Members = s.members()
@@ -501,6 +506,7 @@ func (s *Site) checkPeer(ctx context.Context, siteID string) {
 	rmj, _ := json.Marshal(nonNil(st.RelayRemovals))
 	s.DB.Exec(`UPDATE peers SET relay_removals = ? WHERE site_id = ? AND relay_removals != ?`, string(rmj), siteID, string(rmj))
 	s.DB.Exec(`UPDATE peers SET joined = ? WHERE site_id = ? AND joined != ?`, st.Joined, siteID, st.Joined)
+	s.DB.Exec(`UPDATE peers SET max_block = ? WHERE site_id = ? AND max_block != ?`, st.MaxBlock, siteID, st.MaxBlock)
 	loc := locationJSON(st.Location)
 	s.DB.Exec(`UPDATE peers SET location = ? WHERE site_id = ? AND location != ?`, loc, siteID, loc)
 	s.DB.Exec(`UPDATE peers SET version = ? WHERE site_id = ? AND version != ?`, st.Version, siteID, st.Version)

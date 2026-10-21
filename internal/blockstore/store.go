@@ -6,6 +6,7 @@ package blockstore
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -25,6 +26,28 @@ type Store interface {
 	// Namespaces and List enumerate stored blocks, for reconciliation.
 	Namespaces(ctx context.Context) ([]string, error)
 	List(ctx context.Context, ns string) ([]string, error)
+}
+
+// RangeGetter reads part of a block: n bytes from off. Stores that can't
+// (older storage nodes) return the whole block, which the caller slices.
+type RangeGetter interface {
+	GetRange(ctx context.Context, ns, id string, off, n int64) ([]byte, error)
+}
+
+// GetRange reads n bytes at off of a block from any store, the whole block
+// when the store can't read part of one.
+func GetRange(ctx context.Context, st Store, ns, id string, off, n int64) ([]byte, error) {
+	if rg, ok := st.(RangeGetter); ok {
+		return rg.GetRange(ctx, ns, id, off, n)
+	}
+	b, err := st.Get(ctx, ns, id)
+	if err != nil {
+		return nil, err
+	}
+	if off < 0 || n < 0 || off+n > int64(len(b)) {
+		return nil, fmt.Errorf("block %s: range %d+%d beyond its %d bytes", id, off, n, len(b))
+	}
+	return b[off : off+n], nil
 }
 
 var safeName = regexp.MustCompile(`^[a-z0-9]{2,64}$`)
@@ -81,6 +104,27 @@ func (s *FS) Get(_ context.Context, ns, id string) ([]byte, error) {
 		return nil, ErrNotFound
 	}
 	return b, err
+}
+
+// GetRange reads n bytes at off of a block.
+func (s *FS) GetRange(_ context.Context, ns, id string, off, n int64) ([]byte, error) {
+	p, err := s.path(ns, id)
+	if err != nil {
+		return nil, err
+	}
+	f, err := os.Open(p)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	b := make([]byte, n)
+	if _, err := f.ReadAt(b, off); err != nil {
+		return nil, fmt.Errorf("block %s: read %d+%d: %w", id, off, n, err)
+	}
+	return b, nil
 }
 
 func (s *FS) Delete(_ context.Context, ns, id string) error {

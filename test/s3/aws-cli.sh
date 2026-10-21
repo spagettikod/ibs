@@ -167,6 +167,21 @@ check "a key's limits can be changed"           curl -sf -b "$WORK/cookies" -X P
 expect_fail "and apply at once, same secret"    "AccessDenied" as "$OB" $S3 s3 cp "$WORK/hello.txt" s3://other/ob2.txt
 check "the full key still sees everything"      bash -c "out=\$($S3 s3 ls) && grep -q ' test\$' <<<\"\$out\" && grep -q ' other\$' <<<\"\$out\""
 
+echo "Many small files (they share blocks inside IBS)"
+mkdir -p "$WORK/many"
+for i in $(seq 1 300); do head -c $((RANDOM % 5000 + 1)) /dev/urandom >"$WORK/many/f$i.bin"; done
+blocks() { curl -sf -b "$WORK/cookies" "$IBS_WEB/api/dashboard" | python3 -c 'import json,sys; print(json.load(sys.stdin)["replication"]["blocks"])'; }
+fewer_blocks() { for _ in $(seq 1 40); do [ "$(blocks)" -lt 60 ] && return 0; sleep 1; done; echo "blocks: $(blocks)"; return 1; }
+check "sync uploads 300 small files"            s3 sync "$WORK/many" s3://test/many
+check "they end up in far fewer blocks"         fewer_blocks
+check "sync again uploads nothing"              bash -c "[ -z \"\$($S3 s3 sync '$WORK/many' s3://test/many)\" ]"
+check "all download unchanged"                  bash -c "$S3 s3 sync s3://test/many '$WORK/many-down' >/dev/null && diff -r '$WORK/many' '$WORK/many-down'"
+check "a range inside one of them"              bash -c "head -c 2000 /dev/urandom >'$WORK/r.bin' && $S3 s3 cp '$WORK/r.bin' s3://test/many-r.bin >/dev/null && sleep 12 && \
+  $S3 s3api get-object --bucket test --key many-r.bin --range bytes=100-1099 '$WORK/r.part' >/dev/null && cmp '$WORK/r.part' <(tail -c +101 '$WORK/r.bin' | head -c 1000)"
+check "overwriting and deleting some"           bash -c "for i in \$(seq 1 50); do head -c 777 /dev/urandom >'$WORK/many/f'\$i.bin; done && rm '$WORK/many'/f1[0-9][0-9].bin && \
+  $S3 s3 sync '$WORK/many' s3://test/many --delete >/dev/null"
+check "then all download as they are now"       bash -c "sleep 12 && $S3 s3 sync s3://test/many '$WORK/many-down2' >/dev/null && diff -r '$WORK/many' '$WORK/many-down2'"
+
 echo "Deleting"
 check "rm deletes one object"                   bash -c "$S3 s3 rm s3://test/moved.txt && ! $S3 s3api head-object --bucket test --key moved.txt >/dev/null 2>&1"
 check "delete-objects deletes several"          api delete-objects --bucket test --delete '{"Objects":[{"Key":"meta.txt"},{"Key":"md5.txt"}]}'

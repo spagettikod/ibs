@@ -35,6 +35,7 @@ type Config struct {
 	PeerGrace     time.Duration // offline time before a peer's replicas stop counting (they're re-created elsewhere)
 	NodeGrace     time.Duration // offline time before a storage node counts as lost (its blocks are restored)
 	RebuildRate   int64         // bytes per second for re-creating copies of an unreachable site
+	CleanupRate   int64         // bytes per second for rewriting shared blocks; 0: no cleanup
 	RoomCooldown  time.Duration // after making room for its own files, how long a site takes no copies
 	CheckInterval time.Duration // peer health / replication loop interval
 
@@ -73,9 +74,14 @@ func Load() (Config, error) {
 	if err != nil || rebuild <= 0 {
 		return Config{}, fmt.Errorf("IBS_REBUILD_RATE: give a rate like 20M (per second)")
 	}
+	cleanup, err := ParseSize(env("IBS_CLEANUP_RATE", "20M"))
+	if err != nil || cleanup < 0 {
+		return Config{}, fmt.Errorf("IBS_CLEANUP_RATE: give a rate like 20M (per second), or 0 for no cleanup")
+	}
 	return Config{
 		StorageLimit:    limit,
 		RebuildRate:     rebuild,
+		CleanupRate:     cleanup,
 		Mode:            env("IBS_MODE", "manager"),
 		DataDir:         env("IBS_DATA", "/data"),
 		WebAddr:         env("IBS_WEB_ADDR", ":8080"),

@@ -44,13 +44,16 @@ func (s *Site) replicationNeeds(ctx context.Context) ([]replNeed, error) {
 					WHERE r.block_id = b.id AND r.state = 'ok' AND p.last_seen >= ?) AS n
 			FROM blocks b JOIN buckets bk ON bk.name = b.bucket
 			WHERE b.refs > 0 AND bk.replication > 0
+				-- New small files wait a moment to be combined into a shared
+				-- block, which is copied instead (sharedblocks.go).
+				AND NOT (b.shared = 0 AND b.file != '' AND b.size < ? AND b.touched > ?)
 				-- Only blocks some online site could take: the others (e.g. with fewer
 				-- sites than copies) would otherwise fill every batch and stall the rest.
 				AND EXISTS (SELECT 1 FROM peers p WHERE p.online = 1
 					AND NOT EXISTS (SELECT 1 FROM replicas r WHERE r.block_id = b.id AND r.site_id = p.site_id))
 				AND b.id > ?
 			ORDER BY b.id)
-		WHERE n < replication LIMIT ?`, countedSince, s.replCursor, replicateBatch)
+		WHERE n < replication LIMIT ?`, countedSince, smallBlock, s.combineCutoff(), s.replCursor, replicateBatch)
 	if err != nil {
 		return nil, err
 	}
@@ -331,6 +334,7 @@ func (s *Site) deleteBlock(ctx context.Context, id string) {
 	if err != nil {
 		return // referenced again or already gone
 	}
+	tx.Exec(`DELETE FROM pieces WHERE block = ?`, id) // none left normally
 	if _, err := tx.Exec(`UPDATE replicas SET state = 'delete' WHERE block_id = ?`, id); err != nil {
 		return
 	}

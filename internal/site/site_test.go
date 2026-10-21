@@ -23,7 +23,7 @@ import (
 
 func newTestSite(t *testing.T) *Site {
 	t.Helper()
-	cfg := config.Config{DataDir: t.TempDir(), PeerGrace: time.Minute, NodeGrace: time.Minute, CheckInterval: time.Second, RoomCooldown: time.Hour, RebuildRate: 1 << 30}
+	cfg := config.Config{DataDir: t.TempDir(), PeerGrace: time.Minute, NodeGrace: time.Minute, CheckInterval: time.Second, RoomCooldown: time.Hour, RebuildRate: 1 << 30, CleanupRate: 1 << 30}
 	s, phrase, err := Create(cfg, "test", "password123")
 	if err != nil {
 		t.Fatal(err)
@@ -166,7 +166,7 @@ func TestUploadsOwnTheirBlocks(t *testing.T) {
 	}
 
 	// A block gone before the commit: the upload fails, nothing is stored.
-	wr, err := s.writeBlocks(ctx, "uploads", strings.NewReader("doomed"))
+	wr, err := s.writeBlocks(ctx, "uploads", strings.NewReader("doomed"), 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +182,7 @@ func TestUploadsOwnTheirBlocks(t *testing.T) {
 	}
 
 	// Blocks of an upload interrupted by a restart are released and collected.
-	wr, _ = s.writeBlocks(ctx, "uploads", strings.NewReader("interrupted"))
+	wr, _ = s.writeBlocks(ctx, "uploads", strings.NewReader("interrupted"), 0)
 	s.Close()
 	s2, err := Open(s.cfg)
 	if err != nil {
@@ -512,7 +512,7 @@ func TestNodeLimitFromWebInterface(t *testing.T) {
 }
 
 func TestEveryFileHasTwoCopiesElsewhere(t *testing.T) {
-	cfg := config.Config{DataDir: t.TempDir(), PeerGrace: time.Minute, NodeGrace: time.Minute, CheckInterval: time.Second, RoomCooldown: time.Hour, RebuildRate: 1 << 30}
+	cfg := config.Config{DataDir: t.TempDir(), PeerGrace: time.Minute, NodeGrace: time.Minute, CheckInterval: time.Second, RoomCooldown: time.Hour, RebuildRate: 1 << 30, CleanupRate: 1 << 30}
 	s, _, err := Create(cfg, "test", "password123")
 	if err != nil {
 		t.Fatal(err)
@@ -655,6 +655,8 @@ func TestReplicationBatches(t *testing.T) {
 	}
 	now := time.Now().Unix()
 	s.DB.Exec(`INSERT INTO peers(site_id, name, pubkey, address, added, last_seen, online) VALUES('only-peer', 'only-peer', x'', '', ?, ?, 1)`, now, now)
+	// Past the wait for being combined into shared blocks.
+	s.DB.Exec(`UPDATE blocks SET touched = touched - 60`)
 
 	batch := func() []replNeed {
 		needs, err := s.replicationNeeds(ctx)

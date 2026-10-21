@@ -37,7 +37,11 @@ func TestUpdates(t *testing.T) {
 	}
 	// An older version from before a change that breaks it can never run
 	// here: it isn't kept.
-	if err := upload("0.9.0", db.Level-1); err == nil || !strings.Contains(err.Error(), "database") {
+	before := db.Level // the level just before the newest breaking change
+	for before > 0 && db.BreakingSince(before, db.Level) == "" {
+		before--
+	}
+	if err := upload("0.9.0", before); err == nil || !strings.Contains(err.Error(), "database") {
 		t.Fatalf("kept a version that can't run on this database: %v", err)
 	}
 	// An older version that knows every change that matters can be gone back to.
