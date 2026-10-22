@@ -9,6 +9,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"filippo.io/age"
+
 	"ibs/internal/blockcodec"
 )
 
@@ -17,9 +19,10 @@ import (
 func TestVerifyChallengeOnNode(t *testing.T) {
 	fs := &FS{Dir: t.TempDir()}
 	ctx := context.Background()
-	id, ct := blockcodec.Encrypt(make([]byte, 32), []byte("hello"))
+	key, _ := age.GenerateHybridIdentity()
+	id, ct, _ := blockcodec.EncryptAge(key.Recipient(), []byte("hello"))
 	fs.Put(ctx, "own", id, ct)
-	bad, _ := blockcodec.Encrypt(make([]byte, 32), []byte("other"))
+	bad, _, _ := blockcodec.EncryptAge(key.Recipient(), []byte("other"))
 	fs.Put(ctx, "own", bad, []byte("rot"))
 
 	ask := func(query string) VerifyResult {

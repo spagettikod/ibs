@@ -37,29 +37,6 @@ func (s *Site) storeBlock(ctx context.Context, bucket, upload, id string, ct []b
 	return err
 }
 
-// readPiece returns the ciphertext of a file's piece of a shared block. It
-// reads only that piece from the node holding the block, checked against the
-// piece's hash; otherwise it reads the whole block (which fetches it from
-// another site and heals it when it's missing or damaged here) and takes the
-// piece from it.
-func (s *Site) readPiece(ctx context.Context, ref BlockRef) ([]byte, error) {
-	var nodeID string
-	s.DB.QueryRowContext(ctx, `SELECT node_id FROM blocks WHERE id = ?`, ref.ID).Scan(&nodeID)
-	if st := s.nodeStore(nodeID); nodeID != "" && st != nil {
-		if ct, err := blockstore.GetRange(ctx, st, blockstore.OwnNS, ref.ID, ref.Off, ref.Len); err == nil && blockcodec.Verify(ref.Piece, ct) {
-			return ct, nil
-		}
-	}
-	ct, err := s.readBlock(ctx, ref.ID)
-	if err != nil {
-		return nil, err
-	}
-	if ref.Off+ref.Len > int64(len(ct)) || !blockcodec.Verify(ref.Piece, ct[ref.Off:ref.Off+ref.Len]) {
-		return nil, fmt.Errorf("piece %s of block %s: %w", ref.Piece[:12], ref.ID[:12], blockcodec.ErrCorrupt)
-	}
-	return ct[ref.Off : ref.Off+ref.Len], nil
-}
-
 // readBlock returns the ciphertext of one of our blocks. It reads the local
 // copy first and falls back to replicas on other sites, healing the local
 // copy when it was missing or corrupt.

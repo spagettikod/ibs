@@ -44,7 +44,7 @@ func TestSealAge(t *testing.T) {
 	if _, err := OpenAge(other.Age, "bucket:photos", sealed); err == nil {
 		t.Fatal("opened with another site's key")
 	}
-	if IsAge(Seal(id.Master, []byte("x"), nil)) {
-		t.Fatal("the old format looks like age")
+	if IsAge([]byte("\x01\x02 random nonce first, as blocks from before age")) {
+		t.Fatal("something else looks like age")
 	}
 }

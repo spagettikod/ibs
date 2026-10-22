@@ -30,7 +30,6 @@ type Stats struct {
 	// be combined, and bytes of deleted files in blocks to be rewritten.
 	CombineLeft int64
 	Freeable    int64
-	ConvertLeft int64 // blocks still encrypted the way from before age
 	Peers       map[string]PeerCounts
 	Nodes       map[string]NodeCounts
 	Buckets     map[string]BucketCounts
@@ -154,6 +153,5 @@ func (s *Site) refreshStats() {
 	s.DB.QueryRow(`SELECT COALESCE(SUM(n), 0) FROM (SELECT COUNT(*) AS n FROM blocks
 		WHERE shared = 0 AND refs = 1 AND upload = '' AND file != '' AND size < ? GROUP BY bucket HAVING n >= 2)`, smallBlock).Scan(&st.CombineLeft)
 	s.DB.QueryRow(`SELECT COALESCE(SUM(dead), 0) FROM blocks WHERE shared = 1 AND refs > 0 AND dead * 2 >= size`).Scan(&st.Freeable)
-	s.DB.QueryRow(`SELECT COUNT(*) FROM blocks WHERE age = 0 AND refs > 0`).Scan(&st.ConvertLeft)
 	s.statsCache.Store(st)
 }

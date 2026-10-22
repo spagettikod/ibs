@@ -9,9 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"ibs/internal/blockcodec"
 	"ibs/internal/blockstore"
-	"ibs/internal/keys"
 )
 
 func TestScrub(t *testing.T) {
@@ -32,7 +30,7 @@ func TestScrub(t *testing.T) {
 
 	// A block kept for another site.
 	owner := strings.Repeat("ab", 16)
-	hid, hct := blockcodec.Encrypt(keys.RandomKey(), []byte("theirs"))
+	hid, hct := testBlock([]byte("theirs"))
 	fsys.Put(ctx, owner, hid, hct)
 	s.DB.Exec(`INSERT INTO held_blocks(owner, id, size, node_id, stored, verified) VALUES(?, ?, ?, ?, ?, 0)`,
 		owner, hid, len(hct), LocalNodeID, time.Now().Unix())
@@ -118,7 +116,7 @@ func TestCopyChallenge(t *testing.T) {
 	fsys := holder.nodeStore(LocalNodeID).(*blockstore.FS)
 	owner := strings.Repeat("cd", 16)
 	put := func(plain string) (string, []byte) {
-		id, ct := blockcodec.Encrypt(keys.RandomKey(), []byte(plain))
+		id, ct := testBlock([]byte(plain))
 		fsys.Put(ctx, owner, id, ct)
 		holder.DB.Exec(`INSERT INTO held_blocks(owner, id, size, node_id, stored, verified) VALUES(?, ?, ?, ?, ?, 0)`,
 			owner, id, len(ct), LocalNodeID, time.Now().Unix())
@@ -127,7 +125,7 @@ func TestCopyChallenge(t *testing.T) {
 	good, goodCT := put("intact")
 	rotten, _ := put("will rot")
 	os.WriteFile(filepath.Join(fsys.Dir, owner, rotten[:2], rotten), []byte("rot"), 0o600)
-	gone, _ := blockcodec.Encrypt(keys.RandomKey(), []byte("never stored"))
+	gone, _ := testBlock([]byte("never stored"))
 
 	nonce := newNonce()
 	reply := holder.checkHeld(ctx, owner, []string{good, rotten, gone}, nonce)
@@ -209,7 +207,7 @@ func TestCopyCheckBounded(t *testing.T) {
 	owner := strings.Repeat("cd", 16)
 	var ids []string
 	for i := range 3 {
-		id, ct := blockcodec.Encrypt(keys.RandomKey(), bytes.Repeat([]byte{byte(i)}, 40<<10))
+		id, ct := testBlock(bytes.Repeat([]byte{byte(i)}, 40<<10))
 		fsys.Put(ctx, owner, id, ct)
 		holder.DB.Exec(`INSERT INTO held_blocks(owner, id, size, node_id, stored, verified) VALUES(?, ?, ?, ?, ?, 0)`,
 			owner, id, len(ct), LocalNodeID, time.Now().Unix())

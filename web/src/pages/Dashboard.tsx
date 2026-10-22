@@ -138,7 +138,6 @@ export default function DashboardPage() {
   const cleanupNotes = [
     cl?.combine_left > 0 && `Combining small files: ${cl.combine_left.toLocaleString()} left`,
     cl?.freeable > 0 && `Freeing space from deleted files: ${fmtBytes(cl.freeable)}`,
-    cl?.convert_left > 0 && `Switching encryption to age: ${cl.convert_left.toLocaleString()} blocks left`,
   ].filter(Boolean) as string[]
   // Copies per file on other sites: wanted, and what the online sites allow.
   const want = data.ibs_capacity.copies
@@ -188,12 +187,7 @@ export default function DashboardPage() {
                 : 'per file, all in place'} />
             <Stat label="Room for your files" value={<>{fmtBytes(roomForMine)}{(busy || restoreNote) && <> <Spinner title={busy || 'Restoring from other sites'} /></>}</>}
               sub={<><Meter used={mine} total={site.capacity} />
-                {site.held_bytes > 0
-                  ? <>{fmtBytes(site.free)} empty, {fmtBytes(giving)} other sites' copies that make way for yours
-                    {restoring > 0 && `, less the ${fmtBytes(restoring)} still being restored`}
-                    {site.held_offline > 0 && `; ${fmtBytes(site.held_offline)} held for offline sites`}</>
-                  : <>{fmtBytes(mine)} of {fmtBytes(site.capacity)} used by your files
-                    {restoring > 0 && `, ${fmtBytes(restoring)} of it still being restored`}</>}</>} />
+                {fmtBytes(mine)} used by you{site.held_bytes > 0 && `, ${fmtBytes(site.held_bytes)} by other sites`}</>} />
           </>
         )}
         <a className="tile-link" href="#/network"><Stat label="The IBS"

@@ -8,9 +8,6 @@
 package blockcodec
 
 import (
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -33,39 +30,6 @@ func ID(ciphertext []byte) string {
 
 func Verify(id string, ciphertext []byte) bool {
 	return ID(ciphertext) == id
-}
-
-func Encrypt(key, plain []byte) (id string, ciphertext []byte) {
-	gcm := newGCM(key)
-	nonce := make([]byte, gcm.NonceSize())
-	if _, err := rand.Read(nonce); err != nil {
-		panic(err)
-	}
-	ct := gcm.Seal(append([]byte{}, nonce...), nonce, plain, nil)
-	return ID(ct), ct
-}
-
-func Decrypt(key []byte, id string, ciphertext []byte) ([]byte, error) {
-	if !Verify(id, ciphertext) {
-		return nil, ErrCorrupt
-	}
-	gcm := newGCM(key)
-	if len(ciphertext) < gcm.NonceSize() {
-		return nil, ErrCorrupt
-	}
-	return gcm.Open(nil, ciphertext[:gcm.NonceSize()], ciphertext[gcm.NonceSize():], nil)
-}
-
-func newGCM(key []byte) cipher.AEAD {
-	b, err := aes.NewCipher(key)
-	if err != nil {
-		panic(err)
-	}
-	g, err := cipher.NewGCM(b)
-	if err != nil {
-		panic(err)
-	}
-	return g
 }
 
 // ValidID reports whether s looks like a block id (64 lowercase hex chars).

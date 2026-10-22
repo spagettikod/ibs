@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"errors"
+	"filippo.io/age"
 	"fmt"
 	"io"
 	"sort"
@@ -307,10 +308,10 @@ func TestMultipart(t *testing.T) {
 }
 
 func TestBlockCorruptionDetected(t *testing.T) {
-	key := keys.RandomKey()
-	id, ct := blockcodec.Encrypt(key, []byte("secret"))
+	key, _ := age.GenerateHybridIdentity()
+	id, ct, _ := blockcodec.EncryptAge(key.Recipient(), []byte("secret"))
 	ct[len(ct)-1] ^= 1
-	if _, err := blockcodec.Decrypt(key, id, ct); err != blockcodec.ErrCorrupt {
+	if _, err := blockcodec.DecryptAge(key, id, ct); err != blockcodec.ErrCorrupt {
 		t.Fatalf("expected corruption error, got %v", err)
 	}
 }
@@ -560,7 +561,7 @@ func TestNodeQuotaConcurrentWrites(t *testing.T) {
 			defer wg.Done()
 			data := make([]byte, 1<<20)
 			rand.Read(data)
-			id, ct := blockcodec.Encrypt(keys.RandomKey(), data)
+			id, ct := testBlock(data)
 			if s.storeBlock(ctx, "quota", "up", id, ct) == nil {
 				stored.Add(1)
 			}

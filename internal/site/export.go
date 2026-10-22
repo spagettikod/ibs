@@ -63,18 +63,18 @@ func Export(opt ExportOptions) (*ExportResult, error) {
 
 	// Each bucket's keys, which also proves the index belongs to the phrase.
 	buckets := map[string]*bucketKeys{}
-	rows, err := index.Query(`SELECT name, wrapped_key, age_key FROM buckets ORDER BY name`)
+	rows, err := index.Query(`SELECT name, age_key FROM buckets ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
 		var name string
-		var wrapped, ageKey []byte
-		rows.Scan(&name, &wrapped, &ageKey)
+		var ageKey []byte
+		rows.Scan(&name, &ageKey)
 		if opt.Bucket != "" && name != opt.Bucket {
 			continue
 		}
-		k, err := unwrapBucketKeys(id, name, wrapped, ageKey)
+		k, err := unwrapBucketKeys(id, name, ageKey)
 		if err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("bucket %s: %w (is this the index of the site with this recovery phrase?)", name, err)
@@ -89,9 +89,7 @@ func Export(opt ExportOptions) (*ExportResult, error) {
 	if opt.PrintKeys {
 		fmt.Fprintf(opt.Log, "# site (opens the index backup and wraps the bucket keys)\n%s\n", id.Age)
 		for name, k := range buckets {
-			if k.age != nil {
-				fmt.Fprintf(opt.Log, "# bucket %s\n%s\n", name, k.age)
-			}
+			fmt.Fprintf(opt.Log, "# bucket %s\n%s\n", name, k.age)
 		}
 		return &ExportResult{}, nil
 	}
@@ -194,25 +192,17 @@ func openIndex(id *keys.Identity, path string) (*sql.DB, func(), error) {
 	return d, func() { d.Close(); cleanup() }, nil
 }
 
-// unwrapBucketKeys opens a bucket's keys with the site's.
-func unwrapBucketKeys(id *keys.Identity, name string, wrapped, ageKey []byte) (*bucketKeys, error) {
-	k := &bucketKeys{}
-	var err error
-	if len(wrapped) > 0 {
-		if k.aes, err = keys.Open(id.Master, wrapped, []byte("bucket:"+name)); err != nil {
-			return nil, err
-		}
+// unwrapBucketKeys opens a bucket's key with the site's.
+func unwrapBucketKeys(id *keys.Identity, name string, ageKey []byte) (*bucketKeys, error) {
+	raw, err := keys.OpenAge(id.Age, "bucket:"+name, ageKey)
+	if err != nil {
+		return nil, err
 	}
-	if len(ageKey) > 0 {
-		raw, err := keys.OpenAge(id.Age, "bucket:"+name, ageKey)
-		if err != nil {
-			return nil, err
-		}
-		if k.age, err = age.ParseHybridIdentity(string(raw)); err != nil {
-			return nil, err
-		}
+	k, err := age.ParseHybridIdentity(string(raw))
+	if err != nil {
+		return nil, err
 	}
-	return k, nil
+	return &bucketKeys{age: k}, nil
 }
 
 // exportPath is where a file goes: out/bucket/key, never outside out.
@@ -258,18 +248,9 @@ func exportFile(k *bucketKeys, refs []BlockRef, where map[string]string, dest st
 	return f.Close()
 }
 
-// decodeEntry decrypts a file's part from its whole block, in any format.
+// decodeEntry decrypts a file's part from its whole block.
 func decodeEntry(k *bucketKeys, ref BlockRef, ct []byte) ([]byte, error) {
-	switch {
-	case ref.Len > 0:
-		if !blockcodec.Verify(ref.ID, ct) || ref.Off+ref.Len > int64(len(ct)) {
-			return nil, blockcodec.ErrCorrupt
-		}
-		return blockcodec.Decrypt(k.aes, ref.Piece, ct[ref.Off:ref.Off+ref.Len])
-	case ref.Pos != nil:
-		if k.age == nil {
-			return nil, errors.New("bucket has no age key")
-		}
+	if ref.Pos != nil {
 		return blockcodec.DecryptAgeRange(k.age, ref.ID, ct, *ref.Pos, ref.Size)
 	}
 	return decryptBlock(k, ref.ID, ct)

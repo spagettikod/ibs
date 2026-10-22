@@ -64,7 +64,6 @@ type pieceSource struct {
 	ref  BlockRef // as in the file's entry; for a block of its own just the ID
 	key  string
 	cost int64 // bytes it adds to the new block, about
-	old  bool  // stored in the format from before age
 }
 
 // sharingAllowed says whether this site may create shared blocks: not while
@@ -93,29 +92,7 @@ func (s *Site) sharedBlocksOnce(ctx context.Context) {
 	s.finishMoves(ctx)
 	if !busy && !s.cleanupDone && time.Since(s.quietSince) >= resumeAfter {
 		s.cleanupDone = !s.cleanup(ctx) // nothing left until something changes
-		if s.cleanupDone {
-			s.noteConverted()
-		}
 	}
-}
-
-// noteConverted records, once, that all of the site's data is encrypted with
-// age: blocks, bucket keys and access keys (and the next metadata backup,
-// which it asks for). A version that reads only age installs after that.
-func (s *Site) noteConverted() {
-	if s.Setting("age_converted") == "1" {
-		return
-	}
-	var old int
-	s.DB.QueryRow(`SELECT (SELECT COUNT(*) FROM blocks WHERE age = 0 AND refs > 0)
-		+ (SELECT COUNT(*) FROM buckets WHERE length(age_key) = 0)
-		+ (SELECT COUNT(*) FROM access_keys WHERE length(secret_age) = 0)`).Scan(&old)
-	if old > 0 {
-		return
-	}
-	db.SetSetting(s.DB, "age_converted", "1")
-	s.markDirty() // the metadata backup, in age too
-	s.log.Info("all data is encrypted with age now")
 }
 
 // copiesArriving reports whether other sites are sending copies here.
@@ -485,7 +462,7 @@ func (s *Site) cleanup(ctx context.Context) bool {
 	}
 	var buckets []string
 	if rows, err := s.DB.QueryContext(ctx, `SELECT DISTINCT bucket FROM blocks
-		WHERE refs > 0 AND node_id != '' AND (age = 0 OR (shared = 1 AND dead * 2 >= size) OR (shared = 0 AND size < ? AND file != ''))`, smallBlock); err == nil {
+		WHERE refs > 0 AND node_id != '' AND ((shared = 1 AND dead * 2 >= size) OR (shared = 0 AND size < ? AND file != ''))`, smallBlock); err == nil {
 		for rows.Next() {
 			var b string
 			rows.Scan(&b)
@@ -545,16 +522,15 @@ func (s *Site) cleanupSources(ctx context.Context, bucket string, busy map[strin
 	fromShared := false
 	full := func(n int64) bool { return total+n > blockcodec.BlockSize }
 
-	// Shared blocks at most half alive (the emptiest first), and those from
-	// before age.
+	// Shared blocks at most half alive, the emptiest first.
 	type shared struct {
 		id         string
 		size, dead int64
 	}
 	var blocks []shared
 	if rows, err := s.DB.QueryContext(ctx, `SELECT id, size, dead FROM blocks
-		WHERE bucket = ? AND shared = 1 AND refs > 0 AND node_id != '' AND (dead * 2 >= size OR age = 0)
-		ORDER BY age, CAST(size - dead AS REAL) / size LIMIT 64`, bucket); err == nil {
+		WHERE bucket = ? AND shared = 1 AND refs > 0 AND node_id != '' AND dead * 2 >= size
+		ORDER BY CAST(size - dead AS REAL) / size LIMIT 64`, bucket); err == nil {
 		for rows.Next() {
 			var b shared
 			rows.Scan(&b.id, &b.size, &b.dead)
@@ -583,11 +559,10 @@ func (s *Site) cleanupSources(ctx context.Context, bucket string, busy map[strin
 	// on from where the round got to in this bucket.
 	cur := cursors[bucket]
 	for done := false; !done; {
-		rows, err := s.DB.QueryContext(ctx, `SELECT id, size, file, touched, age FROM blocks
+		rows, err := s.DB.QueryContext(ctx, `SELECT id, size, file, touched FROM blocks
 			WHERE bucket = ? AND shared = 0 AND refs = 1 AND upload = '' AND file != '' AND size < ? AND node_id != ''
-				-- not new ones without copies: those are combining's (but it
-				-- doesn't convert a lone block from before age)
-				AND (age = 0 OR touched <= ? OR EXISTS (SELECT 1 FROM replicas r WHERE r.block_id = blocks.id))
+				-- not new ones without copies: those are combining's
+				AND (touched <= ? OR EXISTS (SELECT 1 FROM replicas r WHERE r.block_id = blocks.id))
 				AND (touched, id) > (?, ?)
 			ORDER BY touched, id LIMIT 256`, bucket, smallBlock, time.Now().Add(-combineScope).Unix(), cur.touched, cur.id)
 		if err != nil {
@@ -598,8 +573,7 @@ func (s *Site) cleanupSources(ctx context.Context, bucket string, busy map[strin
 			n++
 			var id, file string
 			var size, touched int64
-			var isAge bool
-			rows.Scan(&id, &size, &file, &touched, &isAge)
+			rows.Scan(&id, &size, &file, &touched)
 			if busy[id] {
 				cur.touched, cur.id = touched, id
 				continue
@@ -609,7 +583,7 @@ func (s *Site) cleanupSources(ctx context.Context, bucket string, busy map[strin
 				break
 			}
 			cur.touched, cur.id = touched, id
-			srcs = append(srcs, pieceSource{ref: BlockRef{ID: id}, key: file, cost: size, old: !isAge})
+			srcs = append(srcs, pieceSource{ref: BlockRef{ID: id}, key: file, cost: size})
 			total += size
 		}
 		rows.Close()
@@ -619,25 +593,7 @@ func (s *Site) cleanupSources(ctx context.Context, bucket string, busy map[strin
 	}
 	cursors[bucket] = cur
 
-	// Nothing else here: a large block from before age, converted alone.
-	if len(srcs) == 0 {
-		rows, err := s.DB.QueryContext(ctx, `SELECT id, size, file FROM blocks
-			WHERE bucket = ? AND age = 0 AND shared = 0 AND size >= ? AND refs = 1 AND upload = '' AND file != '' AND node_id != ''
-			ORDER BY id LIMIT 64`, bucket, smallBlock)
-		if err == nil {
-			for rows.Next() {
-				var id, file string
-				var size int64
-				rows.Scan(&id, &size, &file)
-				if !busy[id] {
-					srcs = append(srcs, pieceSource{ref: BlockRef{ID: id}, key: file, cost: size, old: true})
-					break
-				}
-			}
-			rows.Close()
-		}
-	}
-	return srcs, len(srcs) >= 2 || (fromShared && len(srcs) >= 1) || (len(srcs) == 1 && srcs[0].old)
+	return srcs, len(srcs) >= 2 || (fromShared && len(srcs) >= 1)
 }
 
 // cleanupCursor is how far a cleanup round got through a bucket's small

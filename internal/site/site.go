@@ -67,12 +67,15 @@ type Site struct {
 	lastState string // fingerprint used by watchState
 
 	// Networking: relays, relayed connections, direct QUIC.
-	netMu   sync.Mutex
-	runCtx  context.Context
-	quicTr  *quic.Transport
-	relays  map[string]*relayEntry
-	relayed *connQueue
-	webHost string // last host the web interface was opened with (NoteWebHost)
+	netMu  sync.Mutex
+	runCtx context.Context
+	quicTr *quic.Transport
+	// incomingQUIC: the latest direct connection each peer opened to us
+	// (connectBack, reconnectBack). Guarded by netMu.
+	incomingQUIC map[string]*quic.Conn
+	relays       map[string]*relayEntry
+	relayed      *connQueue
+	webHost      string // last host the web interface was opened with (NoteWebHost)
 	// relayMoveTried: when a relay was last tried at an address another site uses.
 	relayMoveTried map[string]time.Time
 
@@ -170,6 +173,10 @@ func Open(cfg config.Config) (*Site, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := allAge(d); err != nil {
+		d.Close()
+		return nil, err
+	}
 	s := &Site{
 		cfg:            cfg,
 		ID:             id,
@@ -188,6 +195,7 @@ func Open(cfg config.Config) (*Site, error) {
 		folderQueue:    make(chan [2]string, 256),
 		events:         newHub(),
 		relays:         map[string]*relayEntry{},
+		incomingQUIC:   map[string]*quic.Conn{},
 		relayed:        newConnQueue(),
 		links:          map[string]Link{},
 	}
@@ -278,9 +286,6 @@ func (s *Site) lockBlock(id string) func() {
 // Run starts the background loops: node and peer health, replication,
 // garbage collection, healing, scrubbing and metadata backup.
 func (s *Site) Run(ctx context.Context) {
-	if err := s.ensureAgeKeys(); err != nil {
-		s.log.Error("give buckets and access keys their age keys", "err", err)
-	}
 	every := func(d time.Duration, name string, f func(context.Context)) {
 		go func() {
 			t := time.NewTicker(d)
@@ -360,4 +365,20 @@ func (s *Site) Run(ctx context.Context) {
 			}
 		}
 	}()
+}
+
+// allAge makes sure all of the site's data is encrypted with age: this
+// version can't read the encryption from before (IBS 1.9 and earlier).
+// IBS 1.10 switches a site over in the background; a site that hasn't
+// finished doesn't start, and the launcher goes back to the version before.
+func allAge(d *sql.DB) error {
+	var blocks, buckets, accessKeys int
+	d.QueryRow(`SELECT COUNT(*) FROM blocks WHERE age = 0 AND refs > 0`).Scan(&blocks)
+	d.QueryRow(`SELECT COUNT(*) FROM buckets WHERE length(age_key) = 0`).Scan(&buckets)
+	d.QueryRow(`SELECT COUNT(*) FROM access_keys WHERE length(secret_age) = 0`).Scan(&accessKeys)
+	if blocks+buckets+accessKeys == 0 {
+		return nil
+	}
+	return fmt.Errorf("this site can't start with this version: %d blocks, %d buckets and %d access keys are still encrypted "+
+		"the way from before age. Run IBS 1.10 until the dashboard no longer shows blocks left to switch to age, then update", blocks, buckets, accessKeys)
 }

@@ -3,6 +3,17 @@
 Each release says what to update and which launcher and relay it works with: IBS,
 the launcher and the relay are released separately.
 
+## Unreleased
+
+### New
+
+- Reads only data encrypted with age. A site still switching stays on 1.10 until it's done.
+
+### Fixed
+
+- A direct connection could show as going through a relay on one of the two sites.
+- **Room for your files** says only what you and other sites use.
+
 ## 1.10.0
 
 **What to update:** sites, under **Settings → Updates**; nodes follow. After updating, a

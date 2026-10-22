@@ -3,8 +3,6 @@
 package keys
 
 import (
-	"crypto/aes"
-	"crypto/cipher"
 	"crypto/ed25519"
 	"crypto/hkdf"
 	"crypto/hmac"
@@ -29,10 +27,9 @@ const SeedSize = 32
 
 // Identity is everything derived from a site's recovery seed.
 type Identity struct {
-	Seed   []byte
-	Priv   ed25519.PrivateKey
-	Pub    ed25519.PublicKey
-	Master []byte // AES-256 key wrapping bucket keys, access keys and metadata backups (before age)
+	Seed []byte
+	Priv ed25519.PrivateKey
+	Pub  ed25519.PublicKey
 	// Age is the site's age identity (post-quantum hybrid): bucket keys,
 	// access keys and metadata backups are encrypted to it.
 	Age    *age.HybridIdentity
@@ -55,10 +52,6 @@ func FromSeed(seed []byte) (*Identity, error) {
 	if err != nil {
 		return nil, err
 	}
-	master, err := hkdf.Key(sha256.New, seed, nil, "ibs/master/v1", 32)
-	if err != nil {
-		return nil, err
-	}
 	ageSecret, err := hkdf.Key(sha256.New, seed, nil, "ibs/age/v1", 32)
 	if err != nil {
 		return nil, err
@@ -69,7 +62,7 @@ func FromSeed(seed []byte) (*Identity, error) {
 	}
 	priv := ed25519.NewKeyFromSeed(edSeed)
 	pub := priv.Public().(ed25519.PublicKey)
-	return &Identity{Seed: seed, Priv: priv, Pub: pub, Master: master, Age: ageID, SiteID: SiteID(pub)}, nil
+	return &Identity{Seed: seed, Priv: priv, Pub: pub, Age: ageID, SiteID: SiteID(pub)}, nil
 }
 
 // SiteID is the stable identifier of a site, derived from its public key.
@@ -104,36 +97,6 @@ func DecodePhrase(phrase string) ([]byte, error) {
 		return nil, errors.New("recovery phrase checksum mismatch")
 	}
 	return seed, nil
-}
-
-// Seal encrypts with AES-256-GCM using a random nonce. Output: nonce || ciphertext.
-func Seal(key, plaintext, aad []byte) []byte {
-	gcm := mustGCM(key)
-	nonce := make([]byte, gcm.NonceSize())
-	if _, err := rand.Read(nonce); err != nil {
-		panic(err)
-	}
-	return gcm.Seal(nonce, nonce, plaintext, aad)
-}
-
-func Open(key, sealed, aad []byte) ([]byte, error) {
-	gcm := mustGCM(key)
-	if len(sealed) < gcm.NonceSize() {
-		return nil, errors.New("sealed data too short")
-	}
-	return gcm.Open(nil, sealed[:gcm.NonceSize()], sealed[gcm.NonceSize():], aad)
-}
-
-func mustGCM(key []byte) cipher.AEAD {
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		panic(err)
-	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		panic(err)
-	}
-	return gcm
 }
 
 func RandomKey() []byte {

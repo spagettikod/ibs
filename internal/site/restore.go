@@ -349,11 +349,10 @@ func fetchBackup(ctx context.Context, h *http.Client, base string) (int64, []byt
 	return parseInt(resp.Header.Get("X-IBS-Generation")), blob, nil
 }
 
-// openBackup decrypts a metadata backup: an age file to the site's identity,
-// or, from before age, AES-GCM under the master key.
+// openBackup decrypts a metadata backup: an age file to the site's identity.
 func openBackup(id *keys.Identity, blob []byte) ([]byte, error) {
-	if keys.IsAge(blob) {
-		return keys.OpenAge(id.Age, string(backupAAD(id.SiteID)), blob)
+	if !keys.IsAge(blob) {
+		return nil, errors.New("the backup is in the encryption from before age, which this version can't read: restore with IBS 1.10")
 	}
-	return keys.Open(id.Master, blob, backupAAD(id.SiteID))
+	return keys.OpenAge(id.Age, string(backupAAD(id.SiteID)), blob)
 }

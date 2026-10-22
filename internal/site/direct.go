@@ -61,7 +61,11 @@ func (s *Site) directLoop(ctx context.Context) {
 				continue
 			}
 			if s.ID.SiteID > p.siteID {
-				continue // the peer initiates; we answer its punch requests
+				// The peer initiates; we answer its punch requests, and connect
+				// back over its direct connection when ours dropped and its
+				// didn't (it then has no reason to start a new one).
+				s.reconnectBack(ctx, pc)
+				continue
 			}
 			pc.mu.Lock()
 			due := (pc.quic == nil || !pc.quic.alive()) && !pc.tryingQUIC && time.Since(pc.directTry) > directBackoff(pc.directFails)
@@ -293,11 +297,31 @@ func (s *Site) connectBack(ctx context.Context, c *quic.Conn) {
 	if err != nil {
 		return
 	}
+	s.netMu.Lock()
+	s.incomingQUIC[id] = c
+	s.netMu.Unlock()
 	pc.mu.Lock()
 	have := (pc.quic != nil && pc.quic.alive()) || pc.tryingQUIC
 	pc.mu.Unlock()
 	if !have {
 		s.tryDirect(ctx, pc, []string{c.RemoteAddr().String()})
+	}
+}
+
+// reconnectBack connects back to a peer over its incoming direct
+// connection when ours is gone but its is alive, with the usual backoff.
+func (s *Site) reconnectBack(ctx context.Context, pc *peerClient) {
+	s.netMu.Lock()
+	in := s.incomingQUIC[pc.siteID]
+	s.netMu.Unlock()
+	if in == nil || in.Context().Err() != nil {
+		return
+	}
+	pc.mu.Lock()
+	due := (pc.quic == nil || !pc.quic.alive()) && !pc.tryingQUIC && time.Since(pc.directTry) > directBackoff(pc.directFails)
+	pc.mu.Unlock()
+	if due {
+		go s.tryDirect(ctx, pc, []string{in.RemoteAddr().String()})
 	}
 }
 
