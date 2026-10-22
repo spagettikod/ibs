@@ -7,6 +7,10 @@
 //	ibs recovery-phrase print the site's recovery phrase (from the data directory)
 //	ibs reset-password  set a new admin password: ibs reset-password <password>
 //	ibs https-off       remove the HTTPS settings made in the web interface
+//	ibs export [flags] OUT
+//	                    write the site's files to OUT from the recovery phrase,
+//	                    its index and folders with its blocks; no running site
+//	                    needed (ibs export -h)
 package main
 
 import (
@@ -94,8 +98,10 @@ func main() {
 		} else if err = site.ResetPassword(cfg.DataDir, os.Args[2]); err == nil {
 			fmt.Println("admin password changed")
 		}
+	case "export":
+		err = runExport(cfg.DataDir, os.Args[2:])
 	default:
-		err = fmt.Errorf("unknown command %q (use manager, node, version, recovery-phrase, reset-password or https-off)", cfg.Mode)
+		err = fmt.Errorf("unknown command %q (use manager, node, version, recovery-phrase, reset-password, https-off or export)", cfg.Mode)
 	}
 	if err != nil {
 		slog.Error("fatal", "err", err)

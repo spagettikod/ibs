@@ -14,7 +14,6 @@ import (
 	"ibs/internal/blockcodec"
 	"ibs/internal/blockstore"
 	"ibs/internal/config"
-	"ibs/internal/keys"
 )
 
 // A scrub checks this site's data everywhere it is kept, like a ZFS scrub: its
@@ -410,7 +409,7 @@ func (r *scrubRun) database(ctx context.Context) {
 			Detail: "the site's database doesn't pass SQLite's integrity check: " + result})
 	}
 	open := func(blob []byte) bool {
-		_, err := keys.Open(s.ID.Master, blob, backupAAD(s.ID.SiteID))
+		_, err := openBackup(s.ID, blob)
 		return err == nil
 	}
 	for _, id := range s.onlineRemoteNodes() {

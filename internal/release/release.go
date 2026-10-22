@@ -39,6 +39,9 @@ type Manifest struct {
 	DBLevel       int    `json:"db_level"`        // database changes it knows; it can't run on a database changed further
 	Released      int64  `json:"released"`        // unix time
 	Notes         string `json:"notes,omitempty"` // what changed, from the changelog (Markdown)
+	// RequiresAge: this version reads only age; a site installs it once all
+	// its data is encrypted with age.
+	RequiresAge bool `json:"requires_age,omitempty"`
 }
 
 // Key is a public key that signs releases.

@@ -43,6 +43,7 @@ func main() {
 	platform := fs.String("platform", "linux/amd64", "platform the program is built for (manifest)")
 	out := fs.String("o", "", "the .ibsrelease file to write (pack)")
 	notes := fs.String("notes", "", "file with the release notes, from the changelog (manifest)")
+	requiresAge := fs.Bool("requires-age", false, "this version reads only age: sites install it once converted (manifest)")
 	var trust []string
 	fs.Func("trust", "also accept a signature by this key, ibspub1:… (pack)", func(v string) error {
 		trust = append(trust, v)
@@ -59,6 +60,7 @@ func main() {
 		sum := sha256.Sum256(program)
 		m := release.Manifest{Version: *ver, Platform: *platform, SHA256: hex.EncodeToString(sum[:]), Size: int64(len(program)),
 			MinCompatible: version.MinCompatible, DBLevel: db.Level, Released: time.Now().Unix()}
+		m.RequiresAge = *requiresAge
 		if *notes != "" {
 			m.Notes = strings.TrimSpace(string(read(*notes)))
 		}

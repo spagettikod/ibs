@@ -283,6 +283,9 @@ type migration struct {
 // whole block and fail.
 const sharedBlocks = "small files sharing blocks, which an older version can't read"
 
+// ageBlocks: an older version can't read blocks encrypted with age.
+const ageBlocks = "blocks encrypted with age, which an older version can't read"
+
 // limitedKeys: an older version would ignore an access key's limits.
 const limitedKeys = "limited access keys, which an older version would give full access"
 
@@ -361,6 +364,14 @@ var migrations = []migration{
 		target  INTEGER NOT NULL,
 		moves   TEXT NOT NULL
 	)`},
+	// age (keys/age.go): each bucket's age identity and each access key's
+	// secret, encrypted to the site's age identity; age marks blocks
+	// encrypted with age (0: the earlier AES-GCM, converted in the
+	// background).
+	{SQL: `ALTER TABLE buckets ADD COLUMN age_key BLOB NOT NULL DEFAULT x''`},
+	{SQL: `ALTER TABLE access_keys ADD COLUMN secret_age BLOB NOT NULL DEFAULT x''`},
+	{SQL: `ALTER TABLE blocks ADD COLUMN age INTEGER NOT NULL DEFAULT 0`, Breaks: ageBlocks},
+	{SQL: `CREATE INDEX IF NOT EXISTS blocks_old ON blocks(bucket) WHERE age = 0`},
 }
 
 // BreakingSince says why a version that knows the first known changes can't

@@ -278,6 +278,9 @@ func (s *Site) lockBlock(id string) func() {
 // Run starts the background loops: node and peer health, replication,
 // garbage collection, healing, scrubbing and metadata backup.
 func (s *Site) Run(ctx context.Context) {
+	if err := s.ensureAgeKeys(); err != nil {
+		s.log.Error("give buckets and access keys their age keys", "err", err)
+	}
 	every := func(d time.Duration, name string, f func(context.Context)) {
 		go func() {
 			t := time.NewTicker(d)

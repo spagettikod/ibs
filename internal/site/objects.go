@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"filippo.io/age"
 	"fmt"
 	"io"
 	"regexp"
@@ -36,26 +37,40 @@ var (
 // files have as many copies as there are sites, and the rest follow.
 const Copies = 2
 
-// BlockRef is one block of a file, or its piece of a shared block: Off and
-// Len say where in the block, Piece is the piece's hash (sharedblocks.go).
+// BlockRef is one block of a file, or its part of a shared block
+// (sharedblocks.go): in an age block, Pos is where the file's data starts in
+// the decrypted block; in a block from before age, Off and Len say where its
+// separately encrypted piece is, and Piece is that piece's hash.
 type BlockRef struct {
 	ID    string `json:"id"`
 	Size  int64  `json:"size"` // plaintext bytes
+	Pos   *int64 `json:"pos,omitempty"`
 	Off   int64  `json:"off,omitempty"`
 	Len   int64  `json:"len,omitempty"`
 	Piece string `json:"piece,omitempty"`
 }
 
-// shared reports whether the file's part is a piece of a shared block.
-func (b BlockRef) shared() bool { return b.Len > 0 }
+// shared reports whether the file's part is in a shared block.
+func (b BlockRef) shared() bool { return b.Pos != nil || b.Len > 0 }
 
-// identity is what stays the same when a piece moves to another block: the
-// piece's hash, or the block's ID for a block of its own.
-func (b BlockRef) identity() string {
-	if b.Piece != "" {
+// pieceKey names a file's part of a shared block in the pieces table, or the
+// block itself for a block of its own.
+func (b BlockRef) pieceKey() string {
+	switch {
+	case b.Piece != "":
 		return b.Piece
+	case b.Pos != nil:
+		return b.ID + "@" + strconv.FormatInt(*b.Pos, 10)
 	}
 	return b.ID
+}
+
+// deadLen is how many bytes of its shared block the part frees when deleted.
+func (b BlockRef) deadLen() int64 {
+	if b.Len > 0 {
+		return b.Len
+	}
+	return b.Size
 }
 
 type ObjectInfo struct {
@@ -93,9 +108,15 @@ func (s *Site) CreateBucket(name string) error {
 	if !ValidBucketName(name) {
 		return ErrInvalidBucketName
 	}
+	// The earlier AES key too, so a version before age can still use the
+	// bucket during an update's probation.
 	wrapped := keys.Seal(s.ID.Master, keys.RandomKey(), []byte("bucket:"+name))
-	_, err := s.DB.Exec(`INSERT INTO buckets(name, created, replication, wrapped_key) VALUES(?, ?, ?, ?)`,
-		name, time.Now().Unix(), Copies, wrapped)
+	ageKey, err := s.newBucketAgeKey(name)
+	if err != nil {
+		return err
+	}
+	_, err = s.DB.Exec(`INSERT INTO buckets(name, created, replication, wrapped_key, age_key) VALUES(?, ?, ?, ?, ?)`,
+		name, time.Now().Unix(), Copies, wrapped, ageKey)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			return ErrBucketExists
@@ -193,24 +214,74 @@ func (s *Site) BucketExists(name string) bool {
 	return err == nil
 }
 
-func (s *Site) bucketKey(name string) ([]byte, error) {
+// bucketKeys are a bucket's keys: its age identity, and the AES key of
+// blocks from before age (until they're converted).
+type bucketKeys struct {
+	aes []byte
+	age *age.HybridIdentity
+}
+
+func (s *Site) bucketKey(name string) (*bucketKeys, error) {
 	if k, ok := s.bucketKeys.Load(name); ok {
-		return k.([]byte), nil
+		return k.(*bucketKeys), nil
 	}
-	var wrapped []byte
-	err := s.DB.QueryRow(`SELECT wrapped_key FROM buckets WHERE name = ?`, name).Scan(&wrapped)
+	var wrapped, ageKey []byte
+	err := s.DB.QueryRow(`SELECT wrapped_key, age_key FROM buckets WHERE name = ?`, name).Scan(&wrapped, &ageKey)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNoSuchBucket
 	}
 	if err != nil {
 		return nil, err
 	}
-	k, err := keys.Open(s.ID.Master, wrapped, []byte("bucket:"+name))
+	k, err := unwrapBucketKeys(s.ID, name, wrapped, ageKey)
 	if err != nil {
-		return nil, fmt.Errorf("unwrap bucket key: %w", err)
+		return nil, fmt.Errorf("unwrap the keys of bucket %s: %w", name, err)
 	}
 	s.bucketKeys.Store(name, k)
 	return k, nil
+}
+
+// newBucketAgeKey makes a bucket's age identity, encrypted to the site's.
+func (s *Site) newBucketAgeKey(name string) ([]byte, error) {
+	id, err := keys.NewAgeIdentity()
+	if err != nil {
+		return nil, err
+	}
+	return keys.SealAge(s.ID.Age.Recipient(), "bucket:"+name, []byte(id.String()))
+}
+
+// ensureAgeKeys gives buckets from before age their age identity, and access
+// keys their secret encrypted with age. The earlier forms stay, for a version
+// before age during an update's probation.
+func (s *Site) ensureAgeKeys() error {
+	rows, err := s.DB.Query(`SELECT name FROM buckets WHERE length(age_key) = 0`)
+	if err != nil {
+		return err
+	}
+	var names []string
+	for rows.Next() {
+		var n string
+		rows.Scan(&n)
+		names = append(names, n)
+	}
+	rows.Close()
+	for _, n := range names {
+		k, err := s.newBucketAgeKey(n)
+		if err != nil {
+			return err
+		}
+		if _, err := s.DB.Exec(`UPDATE buckets SET age_key = ? WHERE name = ? AND length(age_key) = 0`, k, n); err != nil {
+			return err
+		}
+		s.bucketKeys.Delete(n)
+	}
+	if err := s.ensureAgeSecrets(); err != nil {
+		return err
+	}
+	if len(names) > 0 {
+		s.markDirty()
+	}
+	return nil
 }
 
 // ---- Writing ----
@@ -255,7 +326,10 @@ func (s *Site) writeBlocks(ctx context.Context, bucket string, r io.Reader, befo
 		if n > 0 {
 			plain := buf[:n]
 			h.Write(plain)
-			id, ct := blockcodec.Encrypt(key, plain)
+			id, ct, encErr := s.encryptBlock(key, plain)
+			if encErr != nil {
+				return nil, encErr
+			}
 			if err := s.storeBlock(ctx, bucket, res.upload, id, ct); err != nil {
 				return nil, fmt.Errorf("store block: %w", err)
 			}
@@ -288,8 +362,8 @@ func adjustRefs(tx *sql.Tx, blocks []BlockRef, delta int, key string) error {
 		var err error
 		switch {
 		case b.shared() && delta < 0:
-			if res, err = tx.Exec(`UPDATE blocks SET refs = refs + ?, dead = dead + ? WHERE id = ?`, delta, b.Len, b.ID); err == nil {
-				_, err = tx.Exec(`DELETE FROM pieces WHERE piece = ?`, b.Piece)
+			if res, err = tx.Exec(`UPDATE blocks SET refs = refs + ?, dead = dead + ? WHERE id = ?`, delta, b.deadLen(), b.ID); err == nil {
+				_, err = tx.Exec(`DELETE FROM pieces WHERE piece = ?`, b.pieceKey())
 			}
 		case delta > 0 && key != "":
 			res, err = tx.Exec(`UPDATE blocks SET refs = refs + ?, upload = '', file = CASE WHEN shared = 0 THEN ? ELSE file END WHERE id = ?`,
@@ -579,22 +653,7 @@ func (s *Site) WriteObject(ctx context.Context, w io.Writer, o *ObjectInfo, offs
 	fetch := func(p piece) <-chan result {
 		ch := make(chan result, 1)
 		go func() {
-			if p.ref.shared() {
-				ct, err := s.readPiece(ctx, p.ref)
-				if err != nil {
-					ch <- result{err: err}
-					return
-				}
-				plain, err := blockcodec.Decrypt(key, p.ref.Piece, ct)
-				ch <- result{plain, err}
-				return
-			}
-			ct, err := s.readBlock(ctx, p.ref.ID)
-			if err != nil {
-				ch <- result{err: err}
-				return
-			}
-			plain, err := blockcodec.Decrypt(key, p.ref.ID, ct)
+			plain, err := s.readEntry(ctx, key, p.ref)
 			ch <- result{plain, err}
 		}()
 		return ch
@@ -1037,3 +1096,55 @@ func SortedMetaKeys(m map[string]string) []string {
 }
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
+
+// encryptBlock encrypts a block: with age once this version is past its
+// probation (sharingAllowed), before that as a version before age expects.
+func (s *Site) encryptBlock(k *bucketKeys, plain []byte) (string, []byte, error) {
+	if k.age != nil && (s.sharingAllowed() || k.aes == nil) {
+		return blockcodec.EncryptAge(k.age.Recipient(), plain)
+	}
+	id, ct := blockcodec.Encrypt(k.aes, plain)
+	return id, ct, nil
+}
+
+// decryptBlock decrypts a whole block in either format.
+func decryptBlock(k *bucketKeys, id string, ct []byte) ([]byte, error) {
+	if keys.IsAge(ct) {
+		if k.age == nil {
+			return nil, errors.New("bucket has no age key")
+		}
+		return blockcodec.DecryptAge(k.age, id, ct)
+	}
+	if k.aes == nil {
+		return nil, errors.New("bucket has no key for blocks from before age")
+	}
+	return blockcodec.Decrypt(k.aes, id, ct)
+}
+
+// readEntry returns the plaintext of one of a file's parts: a block of its
+// own, its part of a shared age block, or its separately encrypted piece of
+// a shared block from before age.
+func (s *Site) readEntry(ctx context.Context, k *bucketKeys, ref BlockRef) ([]byte, error) {
+	switch {
+	case ref.Len > 0:
+		ct, err := s.readPiece(ctx, ref)
+		if err != nil {
+			return nil, err
+		}
+		return blockcodec.Decrypt(k.aes, ref.Piece, ct)
+	case ref.Pos != nil:
+		ct, err := s.readBlock(ctx, ref.ID)
+		if err != nil {
+			return nil, err
+		}
+		if k.age == nil {
+			return nil, errors.New("bucket has no age key")
+		}
+		return blockcodec.DecryptAgeRange(k.age, ref.ID, ct, *ref.Pos, ref.Size)
+	}
+	ct, err := s.readBlock(ctx, ref.ID)
+	if err != nil {
+		return nil, err
+	}
+	return decryptBlock(k, ref.ID, ct)
+}

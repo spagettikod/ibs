@@ -358,14 +358,15 @@ Environment variables. All are optional.
 ## How your data is protected
 
 - **Encrypted before it's stored.** Files are split into 4 MiB blocks (16 MiB after a
-  file's first GiB), and each is encrypted (AES-256-GCM) with its bucket's key. Small
-  files share blocks, each encrypted on its own, so many small files don't mean many
-  blocks. That happens before anything is
-  written, locally or elsewhere. Nodes, other sites and relays only ever see encrypted
-  blocks. They can check that a block is intact, but they can't read it.
+  file's first GiB; small files share blocks), and each block is encrypted with
+  [age](https://age-encryption.org), a widely used, reviewed encryption format, with
+  post-quantum keys: safe even against future quantum computers. That happens before
+  anything is written, locally or elsewhere. Nodes, other sites and relays only ever see
+  encrypted blocks. They can check that a block is intact, but they can't read it.
 - **One recovery phrase.** Creating a site shows a recovery phrase once. All of the
-  site's keys come from it. With the phrase you can rebuild a lost site; without it,
-  nobody can, including you. Keep it offline.
+  site's keys come from it. With the phrase you can rebuild a lost site, or get your
+  files out without IBS (see below); without it, nobody can, including you. Keep it
+  offline.
 - **Every file exists three times.** One copy at your site and one on each of two other
   sites, never two on the same site. An upload is confirmed once it's stored at your
   site, and the copies follow within seconds. The web interface shows what's still being
@@ -580,6 +581,25 @@ the new address set on it too.
 At least one of your other sites must be online. Files that weren't copied to other sites
 yet are lost with the site. With a relay older than 1.5.0, use one your site was
 registered with.
+
+</details>
+
+<details><summary><b>Get your files out without IBS</b></summary>
+
+`ibs export` writes every file to a folder from the recovery phrase, the site's index
+and the folders holding its blocks. No running site or other sites are needed, and it
+reads blocks from any disk that has them: the site's, a node's, or another site's
+copies. With the site's disk:
+
+```bash
+docker run --rm -it -v /srv/ibs:/data -v /mnt/rescue:/out ibs export /out
+```
+
+It asks for the recovery phrase. If the site's disk is lost, use a metadata backup as
+the index: a node keeps it as `site-metadata.bin` in its data folder, and other sites as
+`peer-backups/<site ID>.bin`. Point `-blocks` at every block folder you have, for
+example `-index /node/site-metadata.bin -blocks /node/blocks,/other-site/blocks`.
+`ibs export -keys` prints the keys to decrypt blocks with the `age` tool by hand.
 
 </details>
 

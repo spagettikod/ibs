@@ -18,6 +18,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"filippo.io/age"
 	"fmt"
 	"math/big"
 	"strings"
@@ -31,7 +32,10 @@ type Identity struct {
 	Seed   []byte
 	Priv   ed25519.PrivateKey
 	Pub    ed25519.PublicKey
-	Master []byte // AES-256 key wrapping bucket keys, access keys and metadata backups
+	Master []byte // AES-256 key wrapping bucket keys, access keys and metadata backups (before age)
+	// Age is the site's age identity (post-quantum hybrid): bucket keys,
+	// access keys and metadata backups are encrypted to it.
+	Age    *age.HybridIdentity
 	SiteID string
 }
 
@@ -55,9 +59,17 @@ func FromSeed(seed []byte) (*Identity, error) {
 	if err != nil {
 		return nil, err
 	}
+	ageSecret, err := hkdf.Key(sha256.New, seed, nil, "ibs/age/v1", 32)
+	if err != nil {
+		return nil, err
+	}
+	ageID, err := AgeIdentityFromSecret(ageSecret)
+	if err != nil {
+		return nil, err
+	}
 	priv := ed25519.NewKeyFromSeed(edSeed)
 	pub := priv.Public().(ed25519.PublicKey)
-	return &Identity{Seed: seed, Priv: priv, Pub: pub, Master: master, SiteID: SiteID(pub)}, nil
+	return &Identity{Seed: seed, Priv: priv, Pub: pub, Master: master, Age: ageID, SiteID: SiteID(pub)}, nil
 }
 
 // SiteID is the stable identifier of a site, derived from its public key.

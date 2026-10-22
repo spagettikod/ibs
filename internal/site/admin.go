@@ -94,9 +94,13 @@ func (s *Site) CreateAccessKey(name, access string, buckets []string) (*AccessKe
 		Buckets: buckets,
 		Secret:  randomString("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789", 40),
 	}
-	enc := keys.Seal(s.ID.Master, []byte(k.Secret), []byte("access-key:"+k.ID))
-	if _, err := s.DB.Exec(`INSERT INTO access_keys(id, secret_enc, name, created, access, buckets) VALUES(?, ?, ?, ?, ?, ?)`,
-		k.ID, enc, k.Name, k.Created.Unix(), access, stored); err != nil {
+	enc := keys.Seal(s.ID.Master, []byte(k.Secret), []byte("access-key:"+k.ID)) // for a version before age
+	encAge, err := keys.SealAge(s.ID.Age.Recipient(), "access-key:"+k.ID, []byte(k.Secret))
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.DB.Exec(`INSERT INTO access_keys(id, secret_enc, secret_age, name, created, access, buckets) VALUES(?, ?, ?, ?, ?, ?, ?)`,
+		k.ID, enc, encAge, k.Name, k.Created.Unix(), access, stored); err != nil {
 		return nil, err
 	}
 	s.markDirty()
@@ -203,16 +207,56 @@ func (s *Site) AccessKeySecret(id string) (string, bool) {
 	if v, ok := s.accessKeys.Load(id); ok {
 		return v.(string), true
 	}
-	var enc []byte
-	if err := s.DB.QueryRow(`SELECT secret_enc FROM access_keys WHERE id = ?`, id).Scan(&enc); err != nil {
+	var enc, encAge []byte
+	if err := s.DB.QueryRow(`SELECT secret_enc, secret_age FROM access_keys WHERE id = ?`, id).Scan(&enc, &encAge); err != nil {
 		return "", false
 	}
-	secret, err := keys.Open(s.ID.Master, enc, []byte("access-key:"+id))
+	var secret []byte
+	var err error
+	if len(encAge) > 0 {
+		secret, err = keys.OpenAge(s.ID.Age, "access-key:"+id, encAge)
+	} else {
+		secret, err = keys.Open(s.ID.Master, enc, []byte("access-key:"+id))
+	}
 	if err != nil {
 		return "", false
 	}
 	s.accessKeys.Store(id, string(secret))
 	return string(secret), true
+}
+
+// ensureAgeSecrets gives access keys from before age their secret encrypted
+// with age.
+func (s *Site) ensureAgeSecrets() error {
+	rows, err := s.DB.Query(`SELECT id, secret_enc FROM access_keys WHERE length(secret_age) = 0`)
+	if err != nil {
+		return err
+	}
+	type old struct {
+		id  string
+		enc []byte
+	}
+	var list []old
+	for rows.Next() {
+		var o old
+		rows.Scan(&o.id, &o.enc)
+		list = append(list, o)
+	}
+	rows.Close()
+	for _, o := range list {
+		secret, err := keys.Open(s.ID.Master, o.enc, []byte("access-key:"+o.id))
+		if err != nil {
+			return fmt.Errorf("access key %s: %w", o.id, err)
+		}
+		encAge, err := keys.SealAge(s.ID.Age.Recipient(), "access-key:"+o.id, secret)
+		if err != nil {
+			return err
+		}
+		if _, err := s.DB.Exec(`UPDATE access_keys SET secret_age = ? WHERE id = ?`, encAge, o.id); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ---- Settings ----
@@ -297,6 +341,7 @@ type Dashboard struct {
 	Cleanup struct {
 		CombineLeft int64 `json:"combine_left"`
 		Freeable    int64 `json:"freeable"`
+		ConvertLeft int64 `json:"convert_left"` // blocks still to switch to age
 		Active      bool  `json:"active"`
 	} `json:"cleanup"`
 	Replication ReplicationHealth `json:"replication"`
@@ -331,7 +376,7 @@ func (s *Site) Dashboard() (*Dashboard, error) {
 		d.Site.HeldBlocks, d.Site.HeldBytes, d.Site.HeldOffline = st.HeldBlocks, st.HeldBytes, st.HeldOffline
 		d.Replication, d.Capacity = st.Health, st.Capacity
 		if s.cfg.CleanupRate > 0 {
-			d.Cleanup.CombineLeft, d.Cleanup.Freeable = st.CombineLeft, st.Freeable
+			d.Cleanup.CombineLeft, d.Cleanup.Freeable, d.Cleanup.ConvertLeft = st.CombineLeft, st.Freeable, st.ConvertLeft
 			d.Cleanup.Active = time.Since(time.Unix(0, s.lastRewrite.Load())) < 15*time.Second
 		}
 	}

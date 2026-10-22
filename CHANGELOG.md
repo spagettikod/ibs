@@ -3,6 +3,18 @@
 Each release says what to update and which launcher and relay it works with: IBS,
 the launcher and the relay are released separately.
 
+## Unreleased
+
+### New
+
+- **Encryption with age:** everything IBS stores is encrypted with
+  [age](https://age-encryption.org), a widely used, reviewed format, with post-quantum
+  keys (ML-KEM with X25519). The recovery phrase stays the only thing to keep. Existing
+  data switches over by itself, in the background; **Your files** shows how many blocks
+  are left.
+- **`ibs export`** writes all files to a folder from the recovery phrase, the site's
+  index and the disks with its blocks, without a running site or other sites.
+
 ## 1.9.1
 
 **What to update:** sites, under **Settings → Updates**; nodes follow.

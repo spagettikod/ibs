@@ -607,7 +607,10 @@ func (s *Site) snapshot(ctx context.Context) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return keys.Seal(s.ID.Master, raw, backupAAD(s.ID.SiteID)), nil
+	if s.sharingAllowed() {
+		return keys.SealAge(s.ID.Age.Recipient(), string(backupAAD(s.ID.SiteID)), raw)
+	}
+	return keys.Seal(s.ID.Master, raw, backupAAD(s.ID.SiteID)), nil // a version before age may still need it
 }
 
 // backupOnce bumps the metadata generation after changes and pushes the

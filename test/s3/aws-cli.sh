@@ -182,6 +182,13 @@ check "overwriting and deleting some"           bash -c "for i in \$(seq 1 50); 
   $S3 s3 sync '$WORK/many' s3://test/many --delete >/dev/null"
 check "then all download as they are now"       bash -c "sleep 12 && $S3 s3 sync s3://test/many '$WORK/many-down2' >/dev/null && diff -r '$WORK/many' '$WORK/many-down2'"
 
+echo "Export without the site (ibs export)"
+PHRASE=$(docker exec "$SITE" ibs recovery-phrase)
+check "export writes every file"                bash -c "docker exec -e IBS_RECOVERY_PHRASE='$PHRASE' '$SITE' ibs export /tmp/out | grep -q '^exported'"
+check "they match what was uploaded"            bash -c "rm -rf '$WORK/exported' && docker cp '$SITE':/tmp/out '$WORK/exported' && diff -r '$WORK/many' '$WORK/exported/test/many'"
+check "a wrong phrase gets nothing"             bash -c "! docker exec -e IBS_RECOVERY_PHRASE='$(docker exec "$SITE" ibs recovery-phrase | tr 'A-Z' 'B-ZA')' '$SITE' ibs export /tmp/out2 2>/dev/null"
+check "the keys for the age tool"               bash -c "docker exec -e IBS_RECOVERY_PHRASE='$PHRASE' '$SITE' ibs export -keys | grep -c AGE-SECRET-KEY-PQ-1 | grep -q '[2-9]'"
+
 echo "Deleting"
 check "rm deletes one object"                   bash -c "$S3 s3 rm s3://test/moved.txt && ! $S3 s3api head-object --bucket test --key moved.txt >/dev/null 2>&1"
 check "delete-objects deletes several"          api delete-objects --bucket test --delete '{"Objects":[{"Key":"meta.txt"},{"Key":"md5.txt"}]}'

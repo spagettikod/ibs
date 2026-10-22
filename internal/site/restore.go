@@ -178,7 +178,7 @@ func Restore(ctx context.Context, cfg config.Config, opt RestoreOptions) (*Site,
 			return nil, fmt.Errorf("can't restore: no backup from your other sites (%s)", strings.Join(errs, "; "))
 		}
 	}
-	raw, err := keys.Open(id.Master, blob, backupAAD(id.SiteID))
+	raw, err := openBackup(id, blob)
 	if err != nil {
 		return nil, errors.New("the backup could not be decrypted with this recovery phrase")
 	}
@@ -209,7 +209,7 @@ func Restore(ctx context.Context, cfg config.Config, opt RestoreOptions) (*Site,
 	}
 	// replace switches to a newer snapshot found elsewhere.
 	replace := func(g int64, b []byte) error {
-		r, err := keys.Open(id.Master, b, backupAAD(id.SiteID))
+		r, err := openBackup(id, b)
 		if err != nil {
 			return nil // not ours; ignore
 		}
@@ -347,4 +347,13 @@ func fetchBackup(ctx context.Context, h *http.Client, base string) (int64, []byt
 		return 0, nil, err
 	}
 	return parseInt(resp.Header.Get("X-IBS-Generation")), blob, nil
+}
+
+// openBackup decrypts a metadata backup: an age file to the site's identity,
+// or, from before age, AES-GCM under the master key.
+func openBackup(id *keys.Identity, blob []byte) ([]byte, error) {
+	if keys.IsAge(blob) {
+		return keys.OpenAge(id.Age, string(backupAAD(id.SiteID)), blob)
+	}
+	return keys.Open(id.Master, blob, backupAAD(id.SiteID))
 }

@@ -1,6 +1,7 @@
 package site
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -49,19 +50,21 @@ const (
 // (Key), the block it is in now (From), the piece's hash, and where it sits
 // in the new block.
 type blockMove struct {
-	Key   string `json:"key"`
-	From  string `json:"from"`
-	Piece string `json:"piece"`
-	Size  int64  `json:"size"`
-	Off   int64  `json:"off"`
-	Len   int64  `json:"len"`
+	Key     string `json:"key"`
+	From    string `json:"from"`
+	FromKey string `json:"from_key"`        // the part's pieceKey where it is now
+	Size    int64  `json:"size"`            // plaintext bytes
+	Pos     int64  `json:"pos"`             // where it starts in the new block, decrypted
+	Whole   bool   `json:"whole,omitempty"` // the new block is this file's block alone
 }
 
 // pieceSource is where a piece is read from: a whole small block, or part of
 // a shared one.
 type pieceSource struct {
-	ref BlockRef // From: ID; for a shared block also Off, Len, Piece
-	key string
+	ref  BlockRef // as in the file's entry; for a block of its own just the ID
+	key  string
+	cost int64 // bytes it adds to the new block, about
+	old  bool  // stored in the format from before age
 }
 
 // sharingAllowed says whether this site may create shared blocks: not while
@@ -90,7 +93,29 @@ func (s *Site) sharedBlocksOnce(ctx context.Context) {
 	s.finishMoves(ctx)
 	if !busy && !s.cleanupDone && time.Since(s.quietSince) >= resumeAfter {
 		s.cleanupDone = !s.cleanup(ctx) // nothing left until something changes
+		if s.cleanupDone {
+			s.noteConverted()
+		}
 	}
+}
+
+// noteConverted records, once, that all of the site's data is encrypted with
+// age: blocks, bucket keys and access keys (and the next metadata backup,
+// which it asks for). A version that reads only age installs after that.
+func (s *Site) noteConverted() {
+	if s.Setting("age_converted") == "1" {
+		return
+	}
+	var old int
+	s.DB.QueryRow(`SELECT (SELECT COUNT(*) FROM blocks WHERE age = 0 AND refs > 0)
+		+ (SELECT COUNT(*) FROM buckets WHERE length(age_key) = 0)
+		+ (SELECT COUNT(*) FROM access_keys WHERE length(secret_age) = 0)`).Scan(&old)
+	if old > 0 {
+		return
+	}
+	db.SetSetting(s.DB, "age_converted", "1")
+	s.markDirty() // the metadata backup, in age too
+	s.log.Info("all data is encrypted with age now")
 }
 
 // copiesArriving reports whether other sites are sending copies here.
@@ -202,39 +227,48 @@ func (s *Site) newSmallBlocks(ctx context.Context, bucket string) (srcs []pieceS
 		if total+size > blockcodec.BlockSize {
 			break
 		}
-		srcs = append(srcs, pieceSource{ref: BlockRef{ID: id, Len: size}, key: file})
+		srcs = append(srcs, pieceSource{ref: BlockRef{ID: id}, key: file, cost: size})
 		total += size
 		oldest = min(oldest, touched)
 	}
 	return srcs, total, oldest
 }
 
-// rewrite reads the pieces and writes them into one new shared block. With
+// rewrite decrypts the parts and writes them, encrypted with age as one
+// block, into a new block; decrypting it again must give the same data. With
 // target 0 (none of them has copies elsewhere) the files move into it at
 // once; otherwise it waits in block_moves until it has target copies on
-// other sites (finishMoves).
+// other sites (finishMoves). One part that isn't from a shared block makes a
+// block of its own (converting a block to age).
 func (s *Site) rewrite(ctx context.Context, bucket string, srcs []pieceSource, target int) error {
-	var ct []byte
+	k, err := s.bucketKey(bucket)
+	if err != nil {
+		return err
+	}
+	if k.age == nil {
+		return errors.New("bucket has no age key yet")
+	}
+	var plain []byte
 	var moves []blockMove
 	for _, src := range srcs {
-		var piece []byte
-		var err error
-		if src.ref.Piece != "" {
-			piece, err = s.readPiece(ctx, src.ref)
-		} else {
-			piece, err = s.readBlock(ctx, src.ref.ID)
-		}
+		data, err := s.readEntry(ctx, k, src.ref)
 		if err != nil {
 			return fmt.Errorf("read %s: %w", src.ref.ID[:12], err)
 		}
-		id := src.ref.identity()
-		if !blockcodec.Verify(id, piece) {
-			return fmt.Errorf("piece %s: %w", id[:12], blockcodec.ErrCorrupt)
-		}
-		moves = append(moves, blockMove{Key: src.key, From: src.ref.ID, Piece: id, Off: int64(len(ct)), Len: int64(len(piece))})
-		ct = append(ct, piece...)
+		moves = append(moves, blockMove{Key: src.key, From: src.ref.ID, FromKey: src.ref.pieceKey(), Size: int64(len(data)), Pos: int64(len(plain))})
+		plain = append(plain, data...)
 	}
-	id := blockcodec.ID(ct)
+	whole := len(srcs) == 1 && !srcs[0].ref.shared()
+	if whole {
+		moves[0].Whole = true
+	}
+	id, ct, err := blockcodec.EncryptAge(k.age.Recipient(), plain)
+	if err != nil {
+		return err
+	}
+	if back, err := blockcodec.DecryptAge(k.age, id, ct); err != nil || !bytes.Equal(back, plain) {
+		return fmt.Errorf("the new block didn't decrypt to the same data (%v); the files stay where they are", err)
+	}
 	marker := "shared:" + keys.RandomToken(8)
 	if err := s.storeBlock(ctx, bucket, marker, id, ct); err != nil {
 		return err
@@ -242,7 +276,7 @@ func (s *Site) rewrite(ctx context.Context, bucket string, srcs []pieceSource, t
 	if target == 0 {
 		var moved int
 		err := s.inTx(func(tx *sql.Tx) (err error) {
-			moved, err = switchPieces(tx, id, bucket, int64(len(ct)), moves, true)
+			moved, err = switchPieces(tx, id, bucket, moves, true)
 			return err
 		})
 		if err != nil {
@@ -250,15 +284,15 @@ func (s *Site) rewrite(ctx context.Context, bucket string, srcs []pieceSource, t
 			return err
 		}
 		if moved > 0 {
-			s.notify(TopicData, TopicReplication) // the shared block is ready to be copied
+			s.notify(TopicData, TopicReplication) // the new block is ready to be copied
 		}
 		return nil
 	}
 	mj, _ := json.Marshal(moves)
-	err := s.inTx(func(tx *sql.Tx) error {
+	err = s.inTx(func(tx *sql.Tx) error {
 		// One reference held by the move, so the block is copied but not
 		// collected while it waits.
-		if _, err := tx.Exec(`UPDATE blocks SET refs = 1, upload = '', shared = 1 WHERE id = ?`, id); err != nil {
+		if _, err := tx.Exec(`UPDATE blocks SET refs = 1, upload = '', shared = ? WHERE id = ?`, !whole, id); err != nil {
 			return err
 		}
 		_, err := tx.Exec(`INSERT INTO block_moves(block, bucket, created, target, moves) VALUES(?, ?, ?, ?, ?)`,
@@ -271,22 +305,25 @@ func (s *Site) rewrite(ctx context.Context, bucket string, srcs []pieceSource, t
 	return err
 }
 
-// switchPieces points files at their pieces in the new block id, where
-// they still use the piece where it was (a file may have been deleted or
-// overwritten meanwhile), and gives up the old places. fresh: the pieces
-// come from new blocks that must still have no copies elsewhere, so no file
-// loses copies by moving. It sets the new block's references to the files
-// that moved; with none, garbage collection removes it.
-func switchPieces(tx *sql.Tx, id, bucket string, size int64, moves []blockMove, fresh bool) (int, error) {
-	moved, live := 0, int64(0)
+// switchPieces points files at their parts in the new block id, where they
+// still use the part where it was (a file may have been deleted or
+// overwritten meanwhile), and gives up the old places. fresh: the parts come
+// from new blocks that must still have no copies elsewhere, so no file loses
+// copies by moving. It sets the new block's references to the files that
+// moved; with none, garbage collection removes it.
+func switchPieces(tx *sql.Tx, id, bucket string, moves []blockMove, fresh bool) (int, error) {
+	moved := 0
+	var total, live int64
+	whole, file := false, ""
 	for _, m := range moves {
+		total += m.Size
 		if fresh {
 			var copies int
 			if err := tx.QueryRow(`SELECT COUNT(*) FROM replicas WHERE block_id = ?`, m.From).Scan(&copies); err != nil {
 				return 0, err
 			}
 			if copies > 0 {
-				continue // copied meanwhile: stays a block of its own; cleanup takes it later
+				continue // copied meanwhile: stays where it is; cleanup takes it later
 			}
 		}
 		var raw string
@@ -300,7 +337,7 @@ func switchPieces(tx *sql.Tx, id, bucket string, size int64, moves []blockMove, 
 		refs := decodeBlocks(raw)
 		i := -1
 		for j, r := range refs {
-			if r.ID == m.From && r.identity() == m.Piece {
+			if r.ID == m.From && r.pieceKey() == m.FromKey && r.Size == m.Size {
 				i = j
 				break
 			}
@@ -309,23 +346,37 @@ func switchPieces(tx *sql.Tx, id, bucket string, size int64, moves []blockMove, 
 			continue
 		}
 		old := refs[i]
-		refs[i] = BlockRef{ID: id, Size: old.Size, Off: m.Off, Len: m.Len, Piece: m.Piece}
+		next := BlockRef{ID: id, Size: old.Size}
+		if !m.Whole {
+			pos := m.Pos
+			next.Pos = &pos
+		}
+		refs[i] = next
 		if _, err := tx.Exec(`UPDATE objects SET blocks = ? WHERE bucket = ? AND key = ?`, encodeBlocks(refs), bucket, m.Key); err != nil {
 			return 0, err
 		}
-		if _, err := tx.Exec(`UPDATE blocks SET refs = refs - 1, dead = dead + CASE WHEN shared = 1 THEN ? ELSE 0 END WHERE id = ?`,
-			m.Len, m.From); err != nil {
+		if old.shared() {
+			if _, err := tx.Exec(`UPDATE blocks SET refs = refs - 1, dead = dead + ? WHERE id = ?`, old.deadLen(), m.From); err != nil {
+				return 0, err
+			}
+			if _, err := tx.Exec(`DELETE FROM pieces WHERE piece = ?`, old.pieceKey()); err != nil {
+				return 0, err
+			}
+		} else if _, err := tx.Exec(`UPDATE blocks SET refs = refs - 1 WHERE id = ?`, m.From); err != nil {
 			return 0, err
 		}
-		if _, err := tx.Exec(`INSERT INTO pieces(piece, block, bucket, key) VALUES(?, ?, ?, ?)
+		if m.Whole {
+			whole, file = true, m.Key
+		} else if _, err := tx.Exec(`INSERT INTO pieces(piece, block, bucket, key) VALUES(?, ?, ?, ?)
 			ON CONFLICT(piece) DO UPDATE SET block = excluded.block, bucket = excluded.bucket, key = excluded.key`,
-			m.Piece, id, bucket, m.Key); err != nil {
+			next.pieceKey(), id, bucket, m.Key); err != nil {
 			return 0, err
 		}
 		moved++
-		live += m.Len
+		live += m.Size
 	}
-	_, err := tx.Exec(`UPDATE blocks SET refs = ?, upload = '', shared = 1, dead = ? WHERE id = ?`, moved, size-live, id)
+	_, err := tx.Exec(`UPDATE blocks SET refs = ?, upload = '', shared = ?, dead = ?, file = ? WHERE id = ?`,
+		moved, !whole, total-live, file, id)
 	if err != nil {
 		return 0, err
 	}
@@ -355,23 +406,22 @@ func (s *Site) finishMoves(ctx context.Context) {
 	}
 	rows.Close()
 	for _, p := range list {
+		var moves []blockMove
+		json.Unmarshal([]byte(p.moves), &moves)
+		if len(moves) > 0 && moves[0].FromKey == "" {
+			// Written by a version before age: given up; cleanup does it again.
+			s.giveUpMove(p.id)
+			continue
+		}
 		if s.countedCopies(p.id) < p.target {
 			if time.Since(time.Unix(p.created, 0)) > movesExpire {
-				s.inTx(func(tx *sql.Tx) error {
-					if _, err := tx.Exec(`UPDATE blocks SET refs = 0 WHERE id = ?`, p.id); err != nil {
-						return err
-					}
-					_, err := tx.Exec(`DELETE FROM block_moves WHERE block = ?`, p.id)
-					return err
-				})
-				s.log.Warn("gave up rewriting a shared block: it didn't get its copies on other sites in time", "block", p.id[:12])
+				s.giveUpMove(p.id)
+				s.log.Warn("gave up rewriting a block: it didn't get its copies on other sites in time", "block", p.id[:12])
 			}
 			continue
 		}
-		var moves []blockMove
-		json.Unmarshal([]byte(p.moves), &moves)
 		if err := s.inTx(func(tx *sql.Tx) error {
-			_, err := switchPieces(tx, p.id, p.bucket, p.size, moves, false)
+			_, err := switchPieces(tx, p.id, p.bucket, moves, false)
 			return err
 		}); err != nil {
 			s.log.Warn("move files into a rewritten block", "block", p.id[:12], "err", err)
@@ -379,6 +429,18 @@ func (s *Site) finishMoves(ctx context.Context) {
 		}
 		s.notify(TopicData, TopicReplication)
 	}
+}
+
+// giveUpMove releases a rewritten block no file moved into; garbage
+// collection removes it here and on other sites.
+func (s *Site) giveUpMove(id string) {
+	s.inTx(func(tx *sql.Tx) error {
+		if _, err := tx.Exec(`UPDATE blocks SET refs = 0 WHERE id = ?`, id); err != nil {
+			return err
+		}
+		_, err := tx.Exec(`DELETE FROM block_moves WHERE block = ?`, id)
+		return err
+	})
 }
 
 // countedCopies is how many copies of a block other sites hold that count:
@@ -423,7 +485,7 @@ func (s *Site) cleanup(ctx context.Context) bool {
 	}
 	var buckets []string
 	if rows, err := s.DB.QueryContext(ctx, `SELECT DISTINCT bucket FROM blocks
-		WHERE refs > 0 AND node_id != '' AND ((shared = 1 AND dead * 2 >= size) OR (shared = 0 AND size < ? AND file != ''))`, smallBlock); err == nil {
+		WHERE refs > 0 AND node_id != '' AND (age = 0 OR (shared = 1 AND dead * 2 >= size) OR (shared = 0 AND size < ? AND file != ''))`, smallBlock); err == nil {
 		for rows.Next() {
 			var b string
 			rows.Scan(&b)
@@ -449,7 +511,7 @@ func (s *Site) cleanup(ctx context.Context) bool {
 			var size int64
 			for _, src := range srcs {
 				target = max(target, s.countedCopies(src.ref.ID))
-				size += src.ref.Len
+				size += src.cost
 			}
 			// Written here and sent to each site that should hold a copy.
 			s.cleanupLimit.wait(ctx, size*int64(1+target), s.cfg.CleanupRate)
@@ -483,15 +545,16 @@ func (s *Site) cleanupSources(ctx context.Context, bucket string, busy map[strin
 	fromShared := false
 	full := func(n int64) bool { return total+n > blockcodec.BlockSize }
 
-	// Shared blocks at most half alive, the emptiest first.
+	// Shared blocks at most half alive (the emptiest first), and those from
+	// before age.
 	type shared struct {
 		id         string
 		size, dead int64
 	}
 	var blocks []shared
 	if rows, err := s.DB.QueryContext(ctx, `SELECT id, size, dead FROM blocks
-		WHERE bucket = ? AND shared = 1 AND refs > 0 AND node_id != '' AND dead * 2 >= size
-		ORDER BY CAST(size - dead AS REAL) / size LIMIT 64`, bucket); err == nil {
+		WHERE bucket = ? AND shared = 1 AND refs > 0 AND node_id != '' AND (dead * 2 >= size OR age = 0)
+		ORDER BY age, CAST(size - dead AS REAL) / size LIMIT 64`, bucket); err == nil {
 		for rows.Next() {
 			var b shared
 			rows.Scan(&b.id, &b.size, &b.dead)
@@ -506,7 +569,7 @@ func (s *Site) cleanupSources(ctx context.Context, bucket string, busy map[strin
 		pieces := s.livePieces(ctx, bucket, b.id)
 		var n int64
 		for _, p := range pieces {
-			n += p.ref.Len
+			n += p.cost
 		}
 		if full(n) {
 			continue
@@ -520,10 +583,11 @@ func (s *Site) cleanupSources(ctx context.Context, bucket string, busy map[strin
 	// on from where the round got to in this bucket.
 	cur := cursors[bucket]
 	for done := false; !done; {
-		rows, err := s.DB.QueryContext(ctx, `SELECT id, size, file, touched FROM blocks
+		rows, err := s.DB.QueryContext(ctx, `SELECT id, size, file, touched, age FROM blocks
 			WHERE bucket = ? AND shared = 0 AND refs = 1 AND upload = '' AND file != '' AND size < ? AND node_id != ''
-				-- not new ones without copies: those are combining's
-				AND (touched <= ? OR EXISTS (SELECT 1 FROM replicas r WHERE r.block_id = blocks.id))
+				-- not new ones without copies: those are combining's (but it
+				-- doesn't convert a lone block from before age)
+				AND (age = 0 OR touched <= ? OR EXISTS (SELECT 1 FROM replicas r WHERE r.block_id = blocks.id))
 				AND (touched, id) > (?, ?)
 			ORDER BY touched, id LIMIT 256`, bucket, smallBlock, time.Now().Add(-combineScope).Unix(), cur.touched, cur.id)
 		if err != nil {
@@ -534,7 +598,8 @@ func (s *Site) cleanupSources(ctx context.Context, bucket string, busy map[strin
 			n++
 			var id, file string
 			var size, touched int64
-			rows.Scan(&id, &size, &file, &touched)
+			var isAge bool
+			rows.Scan(&id, &size, &file, &touched, &isAge)
 			if busy[id] {
 				cur.touched, cur.id = touched, id
 				continue
@@ -544,7 +609,7 @@ func (s *Site) cleanupSources(ctx context.Context, bucket string, busy map[strin
 				break
 			}
 			cur.touched, cur.id = touched, id
-			srcs = append(srcs, pieceSource{ref: BlockRef{ID: id, Len: size}, key: file})
+			srcs = append(srcs, pieceSource{ref: BlockRef{ID: id}, key: file, cost: size, old: !isAge})
 			total += size
 		}
 		rows.Close()
@@ -553,7 +618,26 @@ func (s *Site) cleanupSources(ctx context.Context, bucket string, busy map[strin
 		}
 	}
 	cursors[bucket] = cur
-	return srcs, len(srcs) >= 2 || (fromShared && len(srcs) >= 1)
+
+	// Nothing else here: a large block from before age, converted alone.
+	if len(srcs) == 0 {
+		rows, err := s.DB.QueryContext(ctx, `SELECT id, size, file FROM blocks
+			WHERE bucket = ? AND age = 0 AND shared = 0 AND size >= ? AND refs = 1 AND upload = '' AND file != '' AND node_id != ''
+			ORDER BY id LIMIT 64`, bucket, smallBlock)
+		if err == nil {
+			for rows.Next() {
+				var id, file string
+				var size int64
+				rows.Scan(&id, &size, &file)
+				if !busy[id] {
+					srcs = append(srcs, pieceSource{ref: BlockRef{ID: id}, key: file, cost: size, old: true})
+					break
+				}
+			}
+			rows.Close()
+		}
+	}
+	return srcs, len(srcs) >= 2 || (fromShared && len(srcs) >= 1) || (len(srcs) == 1 && srcs[0].old)
 }
 
 // cleanupCursor is how far a cleanup round got through a bucket's small
@@ -584,8 +668,8 @@ func (s *Site) livePieces(ctx context.Context, bucket, block string) []pieceSour
 			continue
 		}
 		for _, r := range decodeBlocks(raw) {
-			if r.ID == block && r.Piece == o.piece {
-				out = append(out, pieceSource{ref: r, key: o.key})
+			if r.ID == block && r.pieceKey() == o.piece {
+				out = append(out, pieceSource{ref: r, key: o.key, cost: r.Size})
 				break
 			}
 		}

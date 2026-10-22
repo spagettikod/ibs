@@ -8,6 +8,7 @@ import (
 
 	"ibs/internal/blockcodec"
 	"ibs/internal/blockstore"
+	"ibs/internal/keys"
 )
 
 // storeBlock stores an encrypted block of a bucket on a local node, as part
@@ -18,10 +19,10 @@ func (s *Site) storeBlock(ctx context.Context, bucket, upload, id string, ct []b
 	defer unlock()
 	now := time.Now().Unix()
 	var nodeID string
-	err := s.DB.QueryRowContext(ctx, `INSERT INTO blocks(id, bucket, size, refs, node_id, touched, verified, upload)
-		VALUES(?, ?, ?, 0, '', ?, ?, ?)
+	err := s.DB.QueryRowContext(ctx, `INSERT INTO blocks(id, bucket, size, refs, node_id, touched, verified, upload, age)
+		VALUES(?, ?, ?, 0, '', ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET touched = excluded.touched, upload = CASE WHEN refs <= 0 THEN excluded.upload ELSE upload END
-		RETURNING node_id`, id, bucket, len(ct), now, now, upload).Scan(&nodeID)
+		RETURNING node_id`, id, bucket, len(ct), now, now, upload, keys.IsAge(ct)).Scan(&nodeID)
 	if err != nil {
 		return err
 	}
