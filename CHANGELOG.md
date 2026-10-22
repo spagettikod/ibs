@@ -3,7 +3,12 @@
 Each release says what to update and which launcher and relay it works with: IBS,
 the launcher and the relay are released separately.
 
-## Unreleased
+## 1.9.1
+
+**What to update:** sites, under **Settings → Updates**; nodes follow.
+
+**Works with:** launcher 1.0.0 or newer (1.1.0 recommended), relay 1.2.0 or newer (1.6.0
+to join through a relay with an invite).
 
 ### New
 
