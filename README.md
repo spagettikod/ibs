@@ -41,8 +41,11 @@ Building, testing and releasing IBS: see [DEVELOPMENT.md](DEVELOPMENT.md).
 
 ## Setup
 
-IBS runs in Docker. Choose your case; the ports each machine needs are under
-[Ports](#ports).
+IBS runs in Docker. The ports each machine needs are under [Ports](#ports).
+
+### 1. Start your site
+
+Choose your case:
 
 <details><summary><b>I have an invite</b></summary>
 
@@ -170,7 +173,7 @@ IBS runs in Docker. Choose your case; the ports each machine needs are under
 
 </details>
 
-### Store your backups
+### 2. Store your backups
 
 1. **Buckets → Create bucket:** give it a name. The form shows roughly how much more
    fits right now.
@@ -183,6 +186,12 @@ IBS runs in Docker. Choose your case; the ports each machine needs are under
    export AWS_ACCESS_KEY_ID=… AWS_SECRET_ACCESS_KEY=… AWS_DEFAULT_REGION=us-east-1
    aws --endpoint-url http://<host>:9000 s3 sync ~/Pictures s3://photos/
    ```
+
+## More setup
+
+Not needed to get going, but it gives you the best setup: private connections with
+HTTPS, the latest fixes without effort, more disk space, and faster copies between
+sites.
 
 ### HTTPS
 
@@ -205,10 +214,6 @@ signed: by the IBS release key, or by a key you add under **Release keys** to ru
 of your own (see [DEVELOPMENT.md](DEVELOPMENT.md)).
 
 Relays are updated by pulling a new `ibs/relay` image.
-
-## More setup
-
-Optional, when you need it.
 
 ### Add storage nodes
 
