@@ -3,7 +3,14 @@
 Each release says what to update and which launcher and relay it works with: IBS,
 the launcher and the relay are released separately.
 
-## Unreleased
+## 1.9.0
+
+**What to update:** sites, under **Settings → Updates**; nodes follow. After updating, a
+site can't go back to 1.8.x: small files then share blocks, which older versions can't
+read.
+
+**Works with:** launcher 1.0.0 or newer (1.1.0 recommended), relay 1.2.0 or newer (1.6.0
+to join through a relay with an invite).
 
 ### New
 
