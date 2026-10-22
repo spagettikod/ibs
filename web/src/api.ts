@@ -82,6 +82,8 @@ export type Dashboard = {
   ibs_capacity: IBSCapacity
   counted: boolean // the figures above are in; false right after a start
   restore_bps: number // blocks fetched back from other sites' copies, bytes/s
+  // Cleanup of blocks: small files still to combine, bytes of deleted files still to free.
+  cleanup: { combine_left: number; freeable: number; active: boolean }
   activity: { writing: boolean; deleting: boolean; buckets: Record<string, 'writing' | 'deleting'> }
   nodes: NodeInfo[]
   peers: PeerInfo[]

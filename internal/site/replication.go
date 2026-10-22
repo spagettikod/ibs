@@ -38,22 +38,23 @@ type replNeed struct {
 // that some online site could take.
 func (s *Site) replicationNeeds(ctx context.Context) ([]replNeed, error) {
 	countedSince := time.Now().Add(-s.cfg.PeerGrace).Unix()
+	hold, holdArgs := s.combineHold()
 	rows, err := s.DB.QueryContext(ctx, `SELECT id, replication, n FROM (
 			SELECT b.id, bk.replication,
 				(SELECT COUNT(*) FROM replicas r JOIN peers p ON p.site_id = r.site_id
 					WHERE r.block_id = b.id AND r.state = 'ok' AND p.last_seen >= ?) AS n
 			FROM blocks b JOIN buckets bk ON bk.name = b.bucket
 			WHERE b.refs > 0 AND bk.replication > 0
-				-- New small files wait a moment to be combined into a shared
-				-- block, which is copied instead (sharedblocks.go).
-				AND NOT (b.shared = 0 AND b.file != '' AND b.size < ? AND b.touched > ?)
+				-- New small files wait to be combined into a shared block,
+				-- which is copied instead (sharedblocks.go).
+				`+hold+`
 				-- Only blocks some online site could take: the others (e.g. with fewer
 				-- sites than copies) would otherwise fill every batch and stall the rest.
 				AND EXISTS (SELECT 1 FROM peers p WHERE p.online = 1
 					AND NOT EXISTS (SELECT 1 FROM replicas r WHERE r.block_id = b.id AND r.site_id = p.site_id))
 				AND b.id > ?
 			ORDER BY b.id)
-		WHERE n < replication LIMIT ?`, countedSince, smallBlock, s.combineCutoff(), s.replCursor, replicateBatch)
+		WHERE n < replication LIMIT ?`, append(append([]any{countedSince}, holdArgs...), s.replCursor, replicateBatch)...)
 	if err != nil {
 		return nil, err
 	}

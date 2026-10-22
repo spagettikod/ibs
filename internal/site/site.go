@@ -91,10 +91,13 @@ type Site struct {
 	rebuildLimit byteLimiter
 	// cleanupLimit keeps rewriting shared blocks to IBS_CLEANUP_RATE.
 	cleanupLimit byteLimiter
-	nextCleanup  time.Time    // sharedBlocksOnce only
-	lastDueCheck time.Time    // sharedBlocksOnce only
-	roomMu       sync.Mutex   // one makeRoom at a time
-	noRoom       atomic.Int64 // blocks no site had room for at the last replication run
+	lastRewrite  atomic.Int64 // when cleanup last wrote a block (unix nanoseconds)
+	cleanupDone  bool         // sharedBlocksOnce: nothing to clean up until something changes
+	quietSince   time.Time    // sharedBlocksOnce: when other work stopped
+	combineMu    sync.Mutex
+	combinedAt   map[string]int64 // bucket -> combining looked at blocks stored before; 0 while receiving files
+	roomMu       sync.Mutex       // one makeRoom at a time
+	noRoom       atomic.Int64     // blocks no site had room for at the last replication run
 	// replCursor: the last block of the previous replication batch (replicateOnce only).
 	replCursor string
 	// activeUploads: multipart uploads with a part arriving now (uploadActive).
@@ -174,6 +177,7 @@ func Open(cfg config.Config) (*Site, error) {
 		log:            slog.Default().With("site", id.SiteID[:8]),
 		started:        time.Now(),
 		nodes:          map[string]blockstore.Store{},
+		combinedAt:     map[string]int64{},
 		peerClients:    map[string]*peerClient{},
 		pushedGen:      map[string]int64{},
 		nodeMetaGen:    map[string]int64{},

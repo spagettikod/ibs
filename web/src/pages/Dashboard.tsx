@@ -133,6 +133,12 @@ export default function DashboardPage() {
     : act?.writing ? 'Files arriving…' : act?.deleting ? 'Files being deleted…' : ''
   // After a restore: your files' blocks coming back from the copies on other sites.
   const restoreNote = restoreProgress(restoring, data.restore_bps, (data.peers ?? []).some((p) => p.online))
+  // Cleanup: small files combined into shared blocks, space of deleted files freed.
+  const cl = data.cleanup
+  const cleanupNotes = [
+    cl?.combine_left > 0 && `Combining small files: ${cl.combine_left.toLocaleString()} left`,
+    cl?.freeable > 0 && `Freeing space from deleted files: ${fmtBytes(cl.freeable)}`,
+  ].filter(Boolean) as string[]
   // Copies per file on other sites: wanted, and what the online sites allow.
   const want = data.ibs_capacity.copies
   const have = Math.min(data.ibs_capacity.sites, want)
@@ -168,9 +174,10 @@ export default function DashboardPage() {
           </>
         ) : (
           <>
-            <Stat label="Your files" value={<>{fmtBytes(site.object_bytes)}{(busy || restoreNote) && <> <Spinner title={busy || 'Restoring from other sites'} /></>}</>}
+            <Stat label="Your files" value={<>{fmtBytes(site.object_bytes)}{(busy || restoreNote || cl?.active) && <> <Spinner title={busy || (restoreNote ? 'Restoring from other sites' : 'Combining small files')} /></>}</>}
               sub={<>{busy && <div className="accent-text">{busy}</div>}
                 {restoreNote && <div className="accent-text">{restoreNote}</div>}
+                {cleanupNotes.map((n) => <div key={n} className={cl.active ? 'accent-text' : 'muted'}>{n}</div>)}
                 {`${site.objects.toLocaleString()} ${site.objects === 1 ? 'object' : 'objects'} in ${site.buckets} ${site.buckets === 1 ? 'bucket' : 'buckets'}, ${r.blocks.toLocaleString()} ${r.blocks === 1 ? 'block' : 'blocks'}`}</>} />
             <Stat label="Copies on other sites" value={r.copying > 0 ? `${copied}%` : `${have} of ${want}`}
               tone={r.under_replicated === 0 ? 'ok' : 'warn'}

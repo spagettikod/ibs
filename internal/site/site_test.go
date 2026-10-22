@@ -655,8 +655,8 @@ func TestReplicationBatches(t *testing.T) {
 	}
 	now := time.Now().Unix()
 	s.DB.Exec(`INSERT INTO peers(site_id, name, pubkey, address, added, last_seen, online) VALUES('only-peer', 'only-peer', x'', '', ?, ?, 1)`, now, now)
-	// Past the wait for being combined into shared blocks.
-	s.DB.Exec(`UPDATE blocks SET touched = touched - 60`)
+	// Stored long ago: not new blocks waiting to be combined.
+	s.DB.Exec(`UPDATE blocks SET touched = touched - 3600`)
 
 	batch := func() []replNeed {
 		needs, err := s.replicationNeeds(ctx)

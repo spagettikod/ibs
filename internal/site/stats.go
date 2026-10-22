@@ -26,6 +26,10 @@ type Stats struct {
 	HeldBlocks  int64
 	HeldBytes   int64
 	HeldOffline int64 // of the held bytes, copies of sites that are offline
+	// Cleanup of blocks (sharedblocks.go): small blocks of their own still to
+	// be combined, and bytes of deleted files in blocks to be rewritten.
+	CombineLeft int64
+	Freeable    int64
 	Peers       map[string]PeerCounts
 	Nodes       map[string]NodeCounts
 	Buckets     map[string]BucketCounts
@@ -145,5 +149,9 @@ func (s *Site) refreshStats() {
 		}
 		rows.Close()
 	}
+	// Only buckets with at least two: a lone small file stays as it is.
+	s.DB.QueryRow(`SELECT COALESCE(SUM(n), 0) FROM (SELECT COUNT(*) AS n FROM blocks
+		WHERE shared = 0 AND refs = 1 AND upload = '' AND file != '' AND size < ? GROUP BY bucket HAVING n >= 2)`, smallBlock).Scan(&st.CombineLeft)
+	s.DB.QueryRow(`SELECT COALESCE(SUM(dead), 0) FROM blocks WHERE shared = 1 AND refs > 0 AND dead * 2 >= size`).Scan(&st.Freeable)
 	s.statsCache.Store(st)
 }

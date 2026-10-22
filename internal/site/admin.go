@@ -289,9 +289,16 @@ type Dashboard struct {
 	} `json:"site"`
 	// Counted: the figures from the cache are in; false right after a start,
 	// before the first calculation.
-	Counted     bool              `json:"counted"`
-	Activity    Activity          `json:"activity"`    // files arriving or being deleted now
-	RestoreBps  float64           `json:"restore_bps"` // blocks fetched back from other sites, bytes/s
+	Counted    bool     `json:"counted"`
+	Activity   Activity `json:"activity"`    // files arriving or being deleted now
+	RestoreBps float64  `json:"restore_bps"` // blocks fetched back from other sites, bytes/s
+	// Cleanup of blocks: small files still to be combined, bytes of deleted
+	// files still to be freed, and whether it's working on them now.
+	Cleanup struct {
+		CombineLeft int64 `json:"combine_left"`
+		Freeable    int64 `json:"freeable"`
+		Active      bool  `json:"active"`
+	} `json:"cleanup"`
 	Replication ReplicationHealth `json:"replication"`
 	Capacity    IBSCapacity       `json:"ibs_capacity"`
 	Nodes       []NodeInfo        `json:"nodes"`
@@ -323,6 +330,10 @@ func (s *Site) Dashboard() (*Dashboard, error) {
 		d.Site.Objects, d.Site.ObjectBytes = st.Objects, st.ObjectBytes
 		d.Site.HeldBlocks, d.Site.HeldBytes, d.Site.HeldOffline = st.HeldBlocks, st.HeldBytes, st.HeldOffline
 		d.Replication, d.Capacity = st.Health, st.Capacity
+		if s.cfg.CleanupRate > 0 {
+			d.Cleanup.CombineLeft, d.Cleanup.Freeable = st.CombineLeft, st.Freeable
+			d.Cleanup.Active = time.Since(time.Unix(0, s.lastRewrite.Load())) < 15*time.Second
+		}
 	}
 	var err error
 	if d.Nodes, err = s.Nodes(); err != nil {

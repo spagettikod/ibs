@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"ibs/internal/blockcodec"
@@ -21,23 +22,24 @@ import (
 // block's, so other sites, scrub and repair see an ordinary block.
 //
 //   - New small files are stored and confirmed as blocks of their own, as
-//     always. Their copies wait up to combineWait while they're combined into
-//     a shared block here, which is then copied once.
+//     always. They're combined into a shared block as soon as a block's worth
+//     has arrived, and the rest as soon as their bucket stops receiving
+//     files; until then their copies wait, so only the shared block is
+//     copied.
 //   - Deleting a file in a shared block counts its piece as dead space.
 //     Cleanup rewrites blocks at most half alive, and small blocks of their
 //     own, into new full ones. A rewritten block gets its copies first; only
-//     then do files move into it, so no file ever has fewer copies.
+//     then do files move into it, so no file ever has fewer copies. Cleanup
+//     makes way for everything else: it pauses while files arrive or are
+//     deleted, or other sites send copies, and goes on resumeAfter later.
 //
 // Every step is safe to stop at: until files are switched (in one
 // transaction) they use the blocks they had, and a new block left without
 // files is garbage collected.
 const (
 	smallBlock    = 1 << 20          // blocks smaller than this are combined
-	combineWait   = 10 * time.Second // how long a new small block may wait to be combined
-	replWait      = 15 * time.Second // and its copies wait for that, a little longer
-	cleanupAfter  = time.Minute      // small blocks of their own older than this are cleaned up
-	cleanupEvery  = 5 * time.Second
-	cleanupIdle   = time.Minute      // after a round with nothing to clean up
+	resumeAfter   = 5 * time.Second  // cleanup goes on this long after other work stopped
+	cleanupEvery  = 5 * time.Second  // a cleanup round, then combining and moves get their turn
 	combineScope  = 10 * time.Minute // combining looks at blocks this new; older ones are cleanup's
 	movesInFlight = 8                // shared blocks written by cleanup waiting for their copies
 	movesExpire   = 24 * time.Hour   // a rewritten block that never got its copies is given up
@@ -69,15 +71,6 @@ func (s *Site) sharingAllowed() bool {
 	return !UnderLauncher() || s.store().Good() == version.Version
 }
 
-// combineCutoff: small blocks stored after this wait for combining before
-// they're copied; none do while sharing isn't allowed.
-func (s *Site) combineCutoff() int64 {
-	if !s.sharingAllowed() {
-		return 0
-	}
-	return time.Now().Add(-replWait).Unix()
-}
-
 // sharedBlocksOnce combines new small blocks, moves files into rewritten
 // blocks that have their copies, and cleans up, in that order, so the three
 // never pick the same blocks.
@@ -85,39 +78,59 @@ func (s *Site) sharedBlocksOnce(ctx context.Context) {
 	if !s.sharingAllowed() {
 		return
 	}
-	s.combineNew(ctx)
-	s.copyWhenDue()
+	act := s.Activity()
+	busy := act.Writing || act.Deleting || s.copiesArriving()
+	if busy {
+		s.quietSince = time.Time{}
+		s.cleanupDone = false // a delete may have left space to free
+	} else if s.quietSince.IsZero() {
+		s.quietSince = time.Now()
+	}
+	s.combineNew(ctx, act.Buckets)
 	s.finishMoves(ctx)
-	if time.Now().After(s.nextCleanup) {
-		s.nextCleanup = time.Now().Add(cleanupEvery)
-		if !s.cleanup(ctx) {
-			s.nextCleanup = time.Now().Add(cleanupIdle)
-		}
+	if !busy && !s.cleanupDone && time.Since(s.quietSince) >= resumeAfter {
+		s.cleanupDone = !s.cleanup(ctx) // nothing left until something changes
 	}
 }
 
-// copyWhenDue starts replication for small blocks whose wait for combining
-// ended since the last round (the ones not combined, e.g. a lone small
-// file): replication only looks again when something changed.
-func (s *Site) copyWhenDue() {
-	now := time.Now()
-	since := s.lastDueCheck
-	s.lastDueCheck = now
-	if since.IsZero() {
-		since = now.Add(-time.Minute) // after a start: anything still waiting
+// copiesArriving reports whether other sites are sending copies here.
+func (s *Site) copiesArriving() bool {
+	arriving := false
+	s.rates.Range(func(_, v any) bool {
+		arriving = v.(*peerRates).in.bps() > 0
+		return !arriving
+	})
+	return arriving
+}
+
+// combineHold is the part of the replication query that holds back copies
+// of new small blocks combining hasn't looked at yet: in a bucket still
+// receiving files, or stored since its last look (combinedAt).
+func (s *Site) combineHold() (string, []any) {
+	if !s.sharingAllowed() {
+		return "", nil
 	}
-	var due int
-	s.DB.QueryRow(`SELECT EXISTS (SELECT 1 FROM blocks WHERE shared = 0 AND file != '' AND size < ? AND refs > 0
-		AND touched > ? AND touched <= ?)`, smallBlock, since.Add(-replWait).Unix(), now.Add(-replWait).Unix()).Scan(&due)
-	if due == 1 {
-		s.replDirty.Store(true)
+	expr := "0"
+	var args []any
+	s.combineMu.Lock()
+	if len(s.combinedAt) > 0 {
+		expr = "CASE b.bucket"
+		for b, at := range s.combinedAt {
+			expr += " WHEN ? THEN ?"
+			args = append(args, b, at)
+		}
+		expr += " ELSE 0 END"
 	}
+	s.combineMu.Unlock()
+	return " AND NOT (b.shared = 0 AND b.file != '' AND b.size < ? AND b.touched > ? AND b.touched >= " + expr + ")",
+		append([]any{smallBlock, time.Now().Add(-combineScope).Unix()}, args...)
 }
 
 // combineNew writes new small blocks without copies elsewhere into shared
-// blocks: once a bucket's add up to a block, or the oldest has waited
-// combineWait. A lone small file stays a block of its own.
-func (s *Site) combineNew(ctx context.Context) {
+// blocks: a block's worth as soon as it's there, and the rest once their
+// bucket stops receiving files (writing: the buckets that are). Then their
+// copies may start: a lone small file stays a block of its own.
+func (s *Site) combineNew(ctx context.Context, writing map[string]string) {
 	rows, err := s.DB.QueryContext(ctx, `SELECT bucket, COUNT(*), SUM(size), MIN(touched) FROM blocks b
 		WHERE shared = 0 AND touched > ? AND refs = 1 AND upload = '' AND file != '' AND size < ? AND node_id != ''
 			AND NOT EXISTS (SELECT 1 FROM replicas r WHERE r.block_id = b.id)
@@ -136,22 +149,38 @@ func (s *Site) combineNew(ctx context.Context) {
 		buckets = append(buckets, b)
 	}
 	rows.Close()
-	due := time.Now().Add(-combineWait).Unix()
+	now := time.Now().Unix()
 	for _, b := range buckets {
-		if b.n < 2 || (b.size < blockcodec.BlockSize && b.oldest > due) {
-			continue
-		}
-		for ctx.Err() == nil {
-			srcs, total, oldest := s.newSmallBlocks(ctx, b.name)
-			if len(srcs) < 2 || (total < blockcodec.BlockSize-smallBlock && oldest > due) {
-				break
+		receiving := writing[b.name] == "writing"
+		for ctx.Err() == nil && b.n >= 2 {
+			srcs, total, _ := s.newSmallBlocks(ctx, b.name)
+			if len(srcs) < 2 || (receiving && total < blockcodec.BlockSize-smallBlock) {
+				break // the rest waits until the bucket stops receiving files
 			}
 			if err := s.rewrite(ctx, b.name, srcs, 0); err != nil {
 				s.log.Warn("combine small files into a block", "bucket", b.name, "err", err)
 				break
 			}
 		}
+		s.combineMu.Lock()
+		if receiving {
+			s.combinedAt[b.name] = 0 // hold copies of everything new
+		} else {
+			s.combinedAt[b.name] = now
+		}
+		s.combineMu.Unlock()
+		if !receiving {
+			s.replDirty.Store(true) // what wasn't combined may be copied now
+		}
 	}
+	// Buckets with nothing new left: no holding back.
+	s.combineMu.Lock()
+	for name := range s.combinedAt {
+		if writing[name] != "writing" && !slices.ContainsFunc(buckets, func(b bucket) bool { return b.name == name }) {
+			delete(s.combinedAt, name)
+		}
+	}
+	s.combineMu.Unlock()
 }
 
 // newSmallBlocks picks the oldest new small blocks of a bucket that fit in
@@ -226,7 +255,7 @@ func (s *Site) rewrite(ctx context.Context, bucket string, srcs []pieceSource, t
 		return nil
 	}
 	mj, _ := json.Marshal(moves)
-	return s.inTx(func(tx *sql.Tx) error {
+	err := s.inTx(func(tx *sql.Tx) error {
 		// One reference held by the move, so the block is copied but not
 		// collected while it waits.
 		if _, err := tx.Exec(`UPDATE blocks SET refs = 1, upload = '', shared = 1 WHERE id = ?`, id); err != nil {
@@ -236,6 +265,10 @@ func (s *Site) rewrite(ctx context.Context, bucket string, srcs []pieceSource, t
 			id, bucket, time.Now().Unix(), target, string(mj))
 		return err
 	})
+	if err == nil {
+		s.notify(TopicReplication) // copy it now: the files move once it has its copies
+	}
+	return err
 }
 
 // switchPieces points files at their pieces in the new block id, where
@@ -398,32 +431,53 @@ func (s *Site) cleanup(ctx context.Context) bool {
 		}
 		rows.Close()
 	}
-	for _, bucket := range buckets {
-		srcs, worth := s.cleanupSources(ctx, bucket, busy)
-		if !worth {
-			continue
+	// Block after block for up to a round, at most IBS_CLEANUP_RATE, while
+	// no files arrive or are deleted.
+	did := false
+	cursors := map[string]cleanupCursor{}
+	for start := time.Now(); time.Since(start) < cleanupEvery && ctx.Err() == nil && inFlight < movesInFlight; {
+		if a := s.Activity(); a.Writing || a.Deleting {
+			return true
 		}
-		target := 0
-		var size int64
-		for _, src := range srcs {
-			target = max(target, s.countedCopies(src.ref.ID))
-			size += src.ref.Len
+		found := false
+		for _, bucket := range buckets {
+			srcs, worth := s.cleanupSources(ctx, bucket, busy, cursors)
+			if !worth {
+				continue
+			}
+			target := 0
+			var size int64
+			for _, src := range srcs {
+				target = max(target, s.countedCopies(src.ref.ID))
+				size += src.ref.Len
+			}
+			// Written here and sent to each site that should hold a copy.
+			s.cleanupLimit.wait(ctx, size*int64(1+target), s.cfg.CleanupRate)
+			if err := s.rewrite(ctx, bucket, srcs, target); err != nil {
+				s.log.Warn("clean up shared blocks", "bucket", bucket, "err", err)
+				continue
+			}
+			s.lastRewrite.Store(time.Now().UnixNano())
+			for _, src := range srcs {
+				busy[src.ref.ID] = true
+			}
+			if target > 0 {
+				inFlight++
+			}
+			did, found = true, true
+			break
 		}
-		// Written here and sent to each site that should hold a copy.
-		s.cleanupLimit.wait(ctx, size*int64(1+target), s.cfg.CleanupRate)
-		if err := s.rewrite(ctx, bucket, srcs, target); err != nil {
-			s.log.Warn("clean up shared blocks", "bucket", bucket, "err", err)
-			continue
+		if !found {
+			break
 		}
-		return true // one block per round: gentle
 	}
-	return false
+	return did
 }
 
 // cleanupSources picks the live pieces of a bucket's emptiest shared blocks
 // and its small blocks of their own, up to one block. worth: rewriting them
 // frees space or combines blocks.
-func (s *Site) cleanupSources(ctx context.Context, bucket string, busy map[string]bool) ([]pieceSource, bool) {
+func (s *Site) cleanupSources(ctx context.Context, bucket string, busy map[string]bool, cursors map[string]cleanupCursor) ([]pieceSource, bool) {
 	var srcs []pieceSource
 	var total int64
 	fromShared := false
@@ -462,26 +516,51 @@ func (s *Site) cleanupSources(ctx context.Context, bucket string, busy map[strin
 		fromShared = true
 	}
 
-	// Small blocks of their own, with copies, not new any more.
-	if rows, err := s.DB.QueryContext(ctx, `SELECT id, size, file FROM blocks
-		WHERE bucket = ? AND shared = 0 AND refs = 1 AND upload = '' AND file != '' AND size < ? AND node_id != '' AND touched < ?
-		ORDER BY touched, id LIMIT 1024`, bucket, smallBlock, time.Now().Add(-cleanupAfter).Unix()); err == nil {
+	// Small blocks of their own, with copies, not new any more: page by page,
+	// on from where the round got to in this bucket.
+	cur := cursors[bucket]
+	for done := false; !done; {
+		rows, err := s.DB.QueryContext(ctx, `SELECT id, size, file, touched FROM blocks
+			WHERE bucket = ? AND shared = 0 AND refs = 1 AND upload = '' AND file != '' AND size < ? AND node_id != ''
+				-- not new ones without copies: those are combining's
+				AND (touched <= ? OR EXISTS (SELECT 1 FROM replicas r WHERE r.block_id = blocks.id))
+				AND (touched, id) > (?, ?)
+			ORDER BY touched, id LIMIT 256`, bucket, smallBlock, time.Now().Add(-combineScope).Unix(), cur.touched, cur.id)
+		if err != nil {
+			break
+		}
+		n := 0
 		for rows.Next() {
+			n++
 			var id, file string
-			var size int64
-			rows.Scan(&id, &size, &file)
+			var size, touched int64
+			rows.Scan(&id, &size, &file, &touched)
 			if busy[id] {
+				cur.touched, cur.id = touched, id
 				continue
 			}
 			if full(size) {
+				done = true
 				break
 			}
+			cur.touched, cur.id = touched, id
 			srcs = append(srcs, pieceSource{ref: BlockRef{ID: id, Len: size}, key: file})
 			total += size
 		}
 		rows.Close()
+		if n == 0 {
+			break
+		}
 	}
+	cursors[bucket] = cur
 	return srcs, len(srcs) >= 2 || (fromShared && len(srcs) >= 1)
+}
+
+// cleanupCursor is how far a cleanup round got through a bucket's small
+// blocks, so the next block in the round starts after it.
+type cleanupCursor struct {
+	touched int64
+	id      string
 }
 
 // livePieces are the pieces of a shared block that files still use.

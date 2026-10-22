@@ -3,6 +3,23 @@
 Each release says what to update and which launcher and relay it works with: IBS,
 the launcher and the relay are released separately.
 
+## Unreleased
+
+### New
+
+- **Your files** on the dashboard shows the cleanup of blocks: how many small files are
+  still to be combined, and how much space from deleted files is still to be freed.
+
+### Fixed
+
+- **Combining existing small files was very slow:** about one block every 5 seconds, and
+  each rewritten block waited up to 2 minutes for its copies. It now goes block after
+  block at up to `IBS_CLEANUP_RATE`, and copies start at once.
+- **No fixed waits:** new small files are combined as soon as their bucket stops
+  receiving files (was after 10 seconds), and a lone small file is copied right away.
+  Cleanup pauses while files arrive or are deleted, or other sites send copies, and
+  goes on 5 seconds after.
+
 ## 1.9.0
 
 **What to update:** sites, under **Settings → Updates**; nodes follow. After updating, a

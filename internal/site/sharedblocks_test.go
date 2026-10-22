@@ -80,7 +80,7 @@ func TestSmallFilesShareBlocks(t *testing.T) {
 	s, files := sharedTestSite(t)
 	ctx := context.Background()
 	before := count(t, s, `SELECT COUNT(*) FROM blocks WHERE refs > 0`)
-	s.combineNew(ctx)
+	s.combineNew(ctx, nil)
 	shared := count(t, s, `SELECT COUNT(*) FROM blocks WHERE shared = 1 AND refs > 0`)
 	if shared == 0 {
 		t.Fatal("no shared blocks")
@@ -231,5 +231,104 @@ func TestLargeBlocks(t *testing.T) {
 	s.DB.Exec(`INSERT INTO peers(site_id, name, pubkey, address, added, last_seen, online) VALUES('old', 'old', x'', '', ?, ?, 1)`, now, now)
 	if got := fmt.Sprint(sizes("with-old-site")); got != "[4 4 4 4 4 4 4 2]" {
 		t.Fatalf("block sizes in MB %s with a site from before large blocks, want all 4", got)
+	}
+}
+
+// One cleanup round rewrites block after block (up to the rate), not one;
+// the dashboard says how many small files are still to be combined.
+func TestCleanupKeepsGoing(t *testing.T) {
+	s := newTestSite(t)
+	ctx := context.Background()
+	s.CreateBucket("many")
+	for i := range 3000 {
+		data := make([]byte, 3000)
+		rand.Read(data)
+		if _, err := s.PutObject(ctx, "many", fmt.Sprint(i), bytes.NewReader(data), "", nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := time.Now().Unix()
+	s.DB.Exec(`UPDATE blocks SET touched = touched - 1200`) // stored long ago, with copies
+	s.DB.Exec(`INSERT INTO peers(site_id, name, pubkey, address, added, last_seen, online, max_block) VALUES('p', 'p', x'', '', ?, ?, 1, ?)`, now, now, 16<<20)
+	s.DB.Exec(`INSERT INTO replicas(block_id, site_id, state, verified) SELECT id, 'p', 'ok', ? FROM blocks`, now)
+	s.refreshStats()
+	if d, _ := s.Dashboard(); d.Cleanup.CombineLeft != 3000 {
+		t.Fatalf("dashboard says %d small files to combine, want 3000", d.Cleanup.CombineLeft)
+	}
+	s.fillBlockFiles(ctx)
+	quiet(s)
+	s.cleanup(ctx)
+	if n := count(t, s, `SELECT COUNT(*) FROM block_moves`); n < 2 {
+		t.Fatalf("one round rewrote %d blocks, want several", n)
+	}
+	if d, _ := s.Dashboard(); !d.Cleanup.Active {
+		t.Fatal("dashboard doesn't say cleanup is working")
+	}
+}
+
+// New small files are combined as soon as their bucket stops receiving
+// files, with no fixed wait; until then their copies are held back. A lone
+// small file is copied as it is.
+func TestCombineWhenQuiet(t *testing.T) {
+	s := newTestSite(t)
+	ctx := context.Background()
+	s.CreateBucket("small")
+	s.CreateBucket("lone")
+	for i := range 5 {
+		s.PutObject(ctx, "small", fmt.Sprint(i), bytes.NewReader(make([]byte, 2000+i)), "", nil)
+	}
+	s.PutObject(ctx, "lone", "one", bytes.NewReader(make([]byte, 500)), "", nil)
+	now := time.Now().Unix()
+	s.DB.Exec(`INSERT INTO peers(site_id, name, pubkey, address, added, last_seen, online, max_block) VALUES('p', 'p', x'', '', ?, ?, 1, ?)`, now, now, 16<<20)
+	needs := func() int {
+		s.replCursor = ""
+		n, err := s.replicationNeeds(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(n)
+	}
+	if n := needs(); n != 0 {
+		t.Fatalf("%d new small blocks copied before combining looked at them", n)
+	}
+	s.combineNew(ctx, map[string]string{"small": "writing", "lone": "writing"})
+	if count(t, s, `SELECT COUNT(*) FROM blocks WHERE shared = 1`) != 0 || needs() != 0 {
+		t.Fatal("a partial block combined, or copied, while files still arrive")
+	}
+	s.combineNew(ctx, nil) // both buckets quiet now
+	if count(t, s, `SELECT COUNT(*) FROM blocks WHERE shared = 1 AND refs = 5`) != 1 {
+		t.Fatal("the five small files weren't combined once the bucket was quiet")
+	}
+	// The next pass, a second later in the running site, releases what was
+	// stored up to the pass before (not yet within the same second).
+	time.Sleep(1100 * time.Millisecond)
+	s.combineNew(ctx, nil)
+	if n := needs(); n != 2 {
+		t.Fatalf("%d blocks to copy, want the shared block and the lone file", n)
+	}
+}
+
+// Cleanup makes way for other work and goes on resumeAfter later.
+func TestCleanupPausesForWork(t *testing.T) {
+	s, _ := sharedTestSite(t)
+	ctx := context.Background()
+	now := time.Now().Unix()
+	s.DB.Exec(`INSERT INTO peers(site_id, name, pubkey, address, added, last_seen, online, max_block) VALUES('p', 'p', x'', '', ?, ?, 1, ?)`, now, now, 16<<20)
+	s.DB.Exec(`INSERT INTO replicas(block_id, site_id, state, verified) SELECT id, 'p', 'ok', ? FROM blocks`, now)
+	s.fillBlockFiles(ctx)
+	s.noteWrite("small") // files arriving
+	s.sharedBlocksOnce(ctx)
+	if count(t, s, `SELECT COUNT(*) FROM block_moves`) != 0 {
+		t.Fatal("cleanup ran while files arrived")
+	}
+	quiet(s)
+	s.sharedBlocksOnce(ctx) // quiet now, but only just
+	if count(t, s, `SELECT COUNT(*) FROM block_moves`) != 0 {
+		t.Fatal("cleanup didn't wait for things to settle")
+	}
+	s.quietSince = time.Now().Add(-resumeAfter)
+	s.sharedBlocksOnce(ctx)
+	if count(t, s, `SELECT COUNT(*) FROM block_moves`) == 0 {
+		t.Fatal("cleanup didn't go on once things were quiet")
 	}
 }
