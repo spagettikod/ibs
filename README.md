@@ -5,10 +5,12 @@
 # IBS — Intergalactic Backup System
 
 IBS is S3 storage that works like RAID, with sites instead of disks: every file is kept
-three times, encrypted, at your site and on two other sites, and a damaged copy is
-repaired from another. You run a **site** yourself, on your own hardware or on a VPS,
-and it connects to sites run by friends, family or your other locations. Together they
-form "the IBS". None of the sites need open ports.
+three times, at your site and on two other sites, and a damaged copy is repaired from
+another. Everything is encrypted with [age](https://age-encryption.org) and post-quantum
+keys before it leaves your site, and your recovery phrase is all you need to get your
+files back, even without IBS. You run a **site** yourself, on your own hardware or on a
+VPS, and it connects to sites run by friends, family or your other locations. Together
+they form "the IBS". None of the sites need open ports.
 
 Use it for backups and archives you write once and rarely read, with any backup tool
 that speaks S3: your data gets off-site copies without renting storage. Whenever keeping
