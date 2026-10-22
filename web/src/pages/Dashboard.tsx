@@ -138,6 +138,7 @@ export default function DashboardPage() {
   const cleanupNotes = [
     cl?.combine_left > 0 && `Combining small files: ${cl.combine_left.toLocaleString()} left`,
     cl?.freeable > 0 && `Freeing space from deleted files: ${fmtBytes(cl.freeable)}`,
+    cl?.convert_left > 0 && `Switching encryption to age: ${cl.convert_left.toLocaleString()} blocks left`,
   ].filter(Boolean) as string[]
   // Copies per file on other sites: wanted, and what the online sites allow.
   const want = data.ibs_capacity.copies
