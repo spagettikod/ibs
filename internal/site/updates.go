@@ -192,10 +192,16 @@ func (s *Site) compatBlocker(m release.Manifest) string {
 	if why := s.dbBlocker(m); why != "" {
 		return why
 	}
-	if m.RequiresAge && s.Setting("age_converted") != "1" {
-		var left int64
-		s.DB.QueryRow(`SELECT COUNT(*) FROM blocks WHERE age = 0 AND refs > 0`).Scan(&left)
-		return fmt.Sprintf("it reads only data encrypted with age, and this site is still switching: %d blocks left, done in the background", left)
+	if m.RequiresAge {
+		// From the data itself: the age_converted flag is only written after
+		// a quiet moment, which a busy site may not have had.
+		var blocks, other int64
+		s.DB.QueryRow(`SELECT COUNT(*) FROM blocks WHERE age = 0 AND refs > 0`).Scan(&blocks)
+		s.DB.QueryRow(`SELECT (SELECT COUNT(*) FROM buckets WHERE length(age_key) = 0)
+			+ (SELECT COUNT(*) FROM access_keys WHERE length(secret_age) = 0)`).Scan(&other)
+		if blocks+other > 0 {
+			return fmt.Sprintf("it reads only data encrypted with age, and this site is still switching: %d blocks left, done in the background", blocks)
+		}
 	}
 	sites, _ := s.Network()
 	for _, n := range sites {

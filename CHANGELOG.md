@@ -3,6 +3,18 @@
 Each release says what to update and which launcher and relay it works with: IBS,
 the launcher and the relay are released separately.
 
+## 1.10.1
+
+**What to update:** sites on 1.10.0 that can't install 1.11.0 although they show no blocks
+left to switch, under **Settings → Updates**.
+
+**Works with:** launcher 1.0.0 or newer (1.1.0 recommended), relay 1.2.0 or newer (1.6.0
+to join through a relay with an invite).
+
+### Fixed
+
+- 1.11.0 couldn't be installed on a busy site that had finished switching to age.
+
 ## 1.10.0
 
 **What to update:** sites, under **Settings → Updates**; nodes follow. After updating, a

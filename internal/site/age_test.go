@@ -130,6 +130,11 @@ func TestConvertToAge(t *testing.T) {
 		t.Fatalf("%d blocks left in the old format", n)
 	}
 	readBoth(t, s, files)
+	// Converted data is enough, also before the flag is written (a busy site
+	// may not get the quiet moment that writes it).
+	if why := s.compatBlocker(m); why != "" {
+		t.Fatalf("a version reading only age is blocked on a converted site: %s", why)
+	}
 	s.noteConverted()
 	if s.Setting("age_converted") != "1" || s.compatBlocker(m) != "" {
 		t.Fatal("the site isn't marked converted")
