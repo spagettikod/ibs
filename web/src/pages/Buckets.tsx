@@ -25,15 +25,27 @@ export default function BucketsPage() {
 
 function BucketList() {
   const { data, error, reload } = useLoader(() => api<Bucket[]>('GET', '/api/buckets'), ['data', 'replication', 'peers'])
-  const capacity = useLoader(() => api<StorableCapacity>('GET', '/api/capacity'), ['data', 'nodes', 'peers', 'replication'])
-  const sites = capacity.data?.sites
+  const [replicas, setReplicas] = useState(3)
+  const capacity = useLoader(() => api<StorableCapacity>('GET', `/api/capacity?replicas=${replicas}`), ['data', 'nodes', 'peers', 'replication'])
+  useEffect(() => { capacity.reload() }, [replicas]) // eslint-disable-line react-hooks/exhaustive-deps
   const [name, setName] = useState('')
   const [formError, setFormError] = useState<string>()
+  const setCopies = async (b: Bucket, n: number) => {
+    if (n < b.replicas && !(await ask(`Fewer copies of ${b.name}`, n === 1
+      ? "Its files will only be at this site: if the site is lost, they're lost too. The copies on other sites are deleted."
+      : 'The copies on other sites that are no longer needed are deleted.', { ok: `Keep ${n}`, danger: true }))) return
+    try {
+      await api('PUT', `/api/buckets/${encodeURIComponent(b.name)}`, { replicas: n })
+      reload()
+    } catch (err) {
+      tell("Couldn't change the copies", (err as Error).message)
+    }
+  }
 
   const create = async (e: FormEvent) => {
     e.preventDefault()
     try {
-      await api('POST', '/api/buckets', { name })
+      await api('POST', '/api/buckets', { name, replicas })
       setName('')
       setFormError(undefined)
       reload()
@@ -57,12 +69,15 @@ function BucketList() {
       <Card title="Create bucket">
         <form className="inline-form" onSubmit={create}>
           <label>Name<input value={name} onChange={(e) => setName(e.target.value.toLowerCase())} placeholder="my-bucket" /></label>
+          <label>Copies<CopiesSelect value={replicas} onChange={setReplicas} /></label>
           <button className="btn primary" disabled={!name}>Create</button>
         </form>
-        {capacity.data && <StorableHint c={capacity.data} />}
+        {replicas === 1
+          ? <p className="small warn-text">Files are only at this site: if it's lost, they're lost too.</p>
+          : capacity.data && <StorableHint c={capacity.data} want={replicas - 1} />}
         <p className="muted small">
-          Every file is kept three times: here, and encrypted with the bucket's key on two other sites in the IBS, wherever
-          there is room.
+          Each file is kept here, and encrypted with the bucket's key on other sites in the IBS, wherever there is room.
+          The number of copies can be changed later.
         </p>
         <ErrorBox error={formError} />
       </Card>
@@ -72,7 +87,7 @@ function BucketList() {
           <Empty>No buckets yet.</Empty>
         ) : (
           <table>
-            <thead><tr><th>Bucket</th><th>Objects</th><th>Size</th><th>Copies on other sites</th><th>Created</th><th /></tr></thead>
+            <thead><tr><th>Bucket</th><th>Objects</th><th>Size</th><th>Copies</th><th>Created</th><th /></tr></thead>
             <tbody>
               {data?.map((b) => (
                 <tr key={b.name}>
@@ -80,7 +95,8 @@ function BucketList() {
                   <td><Counted ok={b.counted}>{b.objects.toLocaleString()}</Counted>
                     {b.activity && <> <Spinner title={b.activity === 'writing' ? 'Files arriving…' : 'Files being deleted…'} /></>}</td>
                   <td><Counted ok={b.counted}>{fmtBytes(b.size)}</Counted></td>
-                  <td><Counted ok={b.counted}><ReplicationStatus b={b} sites={sites} /></Counted></td>
+                  <td><CopiesSelect value={b.replicas} onChange={(n) => setCopies(b, n)} />
+                    <Counted ok={b.counted}><ReplicationStatus b={b} /></Counted></td>
                   <td>{fmtDate(b.created)}</td>
                   <td className="right"><button className="btn small danger" onClick={() => remove(b)}>Delete</button></td>
                 </tr>
@@ -93,19 +109,30 @@ function BucketList() {
   )
 }
 
-/** How much more this site can store right now, with its copies on other sites. */
-function StorableHint({ c }: { c: StorableCapacity }) {
+/** The number of copies of a bucket's files, this site's included. */
+function CopiesSelect({ value, onChange }: { value: number; onChange: (n: number) => void }) {
+  return (
+    <select value={value} onChange={(e) => onChange(Number(e.target.value))}>
+      <option value={1}>1: only this site</option>
+      <option value={2}>2: here and one other site</option>
+      <option value={3}>3: here and two other sites</option>
+    </select>
+  )
+}
+
+/** How much more this site can store right now, with want copies on other sites. */
+function StorableHint({ c, want }: { c: StorableCapacity; want: number }) {
   const short = c.limited_by === 'sites'
-  const want = 2
+  const copies = (n: number) => `${n} ${n === 1 ? 'copy' : 'copies'}`
   let detail: string
   if (c.sites === 0) {
-    detail = `Warning: no other site is online, so files have no copies elsewhere yet. They're stored here, and the copies are made when other sites are available.`
+    detail = `Files have no copies elsewhere yet: no other site is online. They're stored here, and the copies are made when other sites are available.`
   } else if (short) {
-    detail = `Warning: files should have ${want} copies on other sites, but only ${c.sites} other site is online. Files are stored with ${c.copies} copy for now; the second is made when another site is available.`
+    detail = `Files get ${copies(c.copies)} on other sites for now, not ${want}: only ${c.sites} other site is online. The rest is made when another site is available.`
   } else if (c.limited_by === 'ibs') {
-    detail = `Limited by the space other sites offer for the ${want} copies. This site alone has room for ${fmtBytes(c.local)}.`
+    detail = `Limited by the space other sites offer for the ${copies(want)}. This site alone has room for ${fmtBytes(c.local)}.`
   } else {
-    detail = `Limited by this site's space. Other sites have room for the ${want} copies.`
+    detail = `Limited by this site's space. Other sites have room for the ${copies(want)}.`
   }
   return (
     <div className={`storable ${short ? 'warn' : ''}`}>
@@ -119,16 +146,12 @@ function StorableHint({ c }: { c: StorableCapacity }) {
   )
 }
 
-function ReplicationStatus({ b, sites }: { b: Bucket; sites?: number }) {
-  if (sites !== undefined && b.replication > sites) {
-    return (
-      <span className="pill warn" title={`Only ${sites} other site${sites === 1 ? ' is' : 's are'} online; the missing copies are made when more sites are available.`}>
-        {sites} of {b.replication}
-      </span>
-    )
-  }
-  if (b.pending > 0) return <span className="pill warn">{b.pending} blocks pending</span>
-  return <span className="pill ok">{b.replication} of {b.replication}</span>
+/** Whether a bucket's files have their copies on other sites. */
+function ReplicationStatus({ b }: { b: Bucket }) {
+  if (b.replicas === 1) return null
+  if (b.short) return <div className="small warn-text">Not possible: the IBS has too few sites</div>
+  if (b.pending > 0) return <div className="small muted">{b.pending.toLocaleString()} blocks being copied</div>
+  return <div className="small muted">all in place</div>
 }
 
 // A folder of the browser in the chosen order: all subfolders (with the first

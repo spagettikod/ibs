@@ -332,3 +332,71 @@ func TestCleanupPausesForWork(t *testing.T) {
 		t.Fatal("cleanup didn't go on once things were quiet")
 	}
 }
+
+// Each bucket has its own number of copies, 1 to 3, changeable; a bucket
+// asking for more copies than the IBS has sites is reported, and only then.
+func TestBucketReplicas(t *testing.T) {
+	s := newTestSite(t)
+	ctx := context.Background()
+	for _, n := range []int{0, 4} {
+		if err := s.NewBucket("bad", n); err == nil {
+			t.Fatalf("%d copies accepted", n)
+		}
+	}
+	if err := s.NewBucket("here", 1); err != nil {
+		t.Fatal(err)
+	}
+	s.CreateBucket("default") // 3 copies
+	big := make([]byte, 2<<20) // not a small file: copied as it is
+	rand.Read(big)
+	s.PutObject(ctx, "here", "f", bytes.NewReader(big), "", nil)
+	s.PutObject(ctx, "default", "f", bytes.NewReader(big), "", nil)
+	now := time.Now().Unix()
+	s.DB.Exec(`INSERT INTO peers(site_id, name, pubkey, address, added, last_seen, online, max_block) VALUES('p', 'p', x'', '', ?, ?, 1, ?)`, now, now, 16<<20)
+	needs := func(bucket string) int {
+		s.replCursor = ""
+		n, _ := s.replicationNeeds(ctx)
+		c := 0
+		for _, nd := range n {
+			var b string
+			s.DB.QueryRow(`SELECT bucket FROM blocks WHERE id = ?`, nd.id).Scan(&b)
+			if b == bucket {
+				c++
+			}
+		}
+		return c
+	}
+	if needs("here") != 0 || needs("default") == 0 {
+		t.Fatal("a one-copy bucket is copied, or a three-copy one isn't")
+	}
+	short := func() []string {
+		d, _ := s.Dashboard()
+		var out []string
+		for _, b := range d.ShortBuckets {
+			out = append(out, fmt.Sprintf("%s:%d", b.Name, b.Replicas))
+		}
+		return out
+	}
+	if got := fmt.Sprint(short()); got != "[default:3]" {
+		t.Fatalf("buckets reported short with one other site: %s", got)
+	}
+	if b, _ := s.ListBuckets(); !b[0].Short || b[0].Replicas != 3 || b[1].Short || b[1].Replicas != 1 {
+		t.Fatalf("bucket list: %+v", b)
+	}
+	if err := s.SetBucketReplicas("default", 2); err != nil || len(short()) != 0 {
+		t.Fatalf("still short at 2 copies with one other site: %v %v", err, short())
+	}
+	if s.SetBucketReplicas("here", 2); needs("here") == 0 {
+		t.Fatal("raising a bucket to 2 copies doesn't copy it")
+	}
+	// Lowering it again: the copy elsewhere is surplus and goes.
+	s.DB.Exec(`INSERT INTO replicas(block_id, site_id, state, verified) SELECT id, 'p', 'ok', ? FROM blocks WHERE bucket = 'here'`, now)
+	s.SetBucketReplicas("here", 1)
+	s.trimOnce(ctx)
+	if n := count(t, s, `SELECT COUNT(*) FROM replicas r JOIN blocks b ON b.id = r.block_id WHERE b.bucket = 'here' AND r.state = 'ok'`); n != 0 {
+		t.Fatalf("%d copies elsewhere kept after lowering to one copy", n)
+	}
+	if err := s.SetBucketReplicas("missing", 2); err != ErrNoSuchBucket {
+		t.Fatalf("missing bucket: %v", err)
+	}
+}

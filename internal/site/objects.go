@@ -32,10 +32,18 @@ var (
 	ErrInvalidRange      = errors.New("requested range is not satisfiable")
 )
 
-// Copies is how many other sites keep a copy of every file. With the copy at
-// this site, each file exists three times. With fewer other sites online,
-// files have as many copies as there are sites, and the rest follow.
-const Copies = 2
+// Each bucket has a number of copies (replicas) of every file, 1 to
+// MaxReplicas: one at this site, the rest on as many other sites (the
+// buckets table keeps that number of other sites, replication). New buckets
+// get Copies other sites by default: three copies in all. With fewer other
+// sites online, files have as many copies as there are sites, and the rest
+// follow.
+const (
+	Copies      = 2
+	MaxReplicas = 3
+)
+
+var ErrInvalidReplicas = fmt.Errorf("copies must be between 1 (only this site) and %d", MaxReplicas)
 
 // BlockRef is one block of a file, or its part of a shared block
 // (sharedblocks.go): Pos is where the file's data starts in the decrypted
@@ -75,12 +83,15 @@ type ObjectInfo struct {
 type BucketInfo struct {
 	Name        string    `json:"name"`
 	Created     time.Time `json:"created"`
-	Replication int       `json:"replication"`
-	Counted     bool      `json:"counted"`            // the counts below are in (stats.go)
-	Activity    string    `json:"activity,omitempty"` // "writing" or "deleting" files now
-	Objects     int64     `json:"objects"`
-	Size        int64     `json:"size"`
-	Pending     int64     `json:"pending"` // blocks still missing replicas
+	Replication int       `json:"replication"` // copies on other sites
+	Replicas    int       `json:"replicas"`    // copies in all, this site's included
+	// Short: the IBS has too few other sites for this many copies.
+	Short    bool   `json:"short"`
+	Counted  bool   `json:"counted"`            // the counts below are in (stats.go)
+	Activity string `json:"activity,omitempty"` // "writing" or "deleting" files now
+	Objects  int64  `json:"objects"`
+	Size     int64  `json:"size"`
+	Pending  int64  `json:"pending"` // blocks still missing replicas
 }
 
 var bucketNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$`)
@@ -92,9 +103,16 @@ func ValidBucketName(name string) bool {
 
 // ---- Buckets ----
 
-func (s *Site) CreateBucket(name string) error {
+// CreateBucket makes a bucket with the default number of copies.
+func (s *Site) CreateBucket(name string) error { return s.NewBucket(name, Copies+1) }
+
+// NewBucket makes a bucket whose files have replicas copies in all.
+func (s *Site) NewBucket(name string, replicas int) error {
 	if !ValidBucketName(name) {
 		return ErrInvalidBucketName
+	}
+	if replicas < 1 || replicas > MaxReplicas {
+		return ErrInvalidReplicas
 	}
 	ageKey, err := s.newBucketAgeKey(name)
 	if err != nil {
@@ -102,7 +120,7 @@ func (s *Site) CreateBucket(name string) error {
 	}
 	// wrapped_key held the bucket key from before age; empty now.
 	_, err = s.DB.Exec(`INSERT INTO buckets(name, created, replication, wrapped_key, age_key) VALUES(?, ?, ?, x'', ?)`,
-		name, time.Now().Unix(), Copies, ageKey)
+		name, time.Now().Unix(), replicas-1, ageKey)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			return ErrBucketExists
@@ -111,6 +129,34 @@ func (s *Site) CreateBucket(name string) error {
 	}
 	s.markDirty()
 	return nil
+}
+
+// SetBucketReplicas changes how many copies a bucket's files have in all.
+// More copies are made on other sites in the background; with fewer, the
+// surplus copies there are deleted.
+func (s *Site) SetBucketReplicas(name string, replicas int) error {
+	if replicas < 1 || replicas > MaxReplicas {
+		return ErrInvalidReplicas
+	}
+	res, err := s.DB.Exec(`UPDATE buckets SET replication = ? WHERE name = ?`, replicas-1, name)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNoSuchBucket
+	}
+	s.markDirty()
+	s.notify(TopicData, TopicReplication)
+	s.log.Info("bucket copies changed", "bucket", name, "copies", replicas)
+	return nil
+}
+
+// otherSites is how many other sites are in the IBS with this one (online or
+// not): the most copies a bucket can have elsewhere.
+func (s *Site) otherSites() int {
+	var n int
+	s.DB.QueryRow(`SELECT COUNT(*) FROM peers`).Scan(&n)
+	return n
 }
 
 func (s *Site) DeleteBucket(name string) error {
@@ -177,6 +223,7 @@ func (s *Site) ListBuckets() ([]BucketInfo, error) {
 	defer rows.Close()
 	st := s.stats() // the counts, from the cache
 	act := s.Activity()
+	others := s.otherSites()
 	var out []BucketInfo
 	for rows.Next() {
 		var b BucketInfo
@@ -185,6 +232,7 @@ func (s *Site) ListBuckets() ([]BucketInfo, error) {
 			return nil, err
 		}
 		b.Created = time.Unix(created, 0).UTC()
+		b.Replicas, b.Short = b.Replication+1, b.Replication > others
 		if st != nil {
 			c := st.Buckets[b.Name]
 			b.Counted, b.Objects, b.Size, b.Pending = true, c.Objects, c.Size, c.Pending

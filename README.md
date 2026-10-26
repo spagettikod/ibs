@@ -177,7 +177,8 @@ Choose your case:
 
 ### 2. Store your backups
 
-1. **Buckets → Create bucket:** give it a name. The form shows roughly how much more
+1. **Buckets → Create bucket:** give it a name and choose how many copies its files get
+   (3 by default: here and on two other sites). The form shows roughly how much more
    fits right now.
 2. **Access keys → Create:** choose what the key may do (full or read only) and which
    buckets (all, or some), then copy the key ID and secret. Give each backup tool its
@@ -369,11 +370,12 @@ Environment variables. All are optional.
   site's keys come from it. With the phrase you can rebuild a lost site, or get your
   files out without IBS (see below); without it, nobody can, including you. Keep it
   offline.
-- **Every file exists three times.** One copy at your site and one on each of two other
-  sites, never two on the same site. An upload is confirmed once it's stored at your
-  site, and the copies follow within seconds. The web interface shows what's still being
-  copied. With fewer than two other sites online, files get as many copies as there are
-  sites, and the rest follow when more sites are available.
+- **Every file exists up to three times.** Each bucket keeps 1 to 3 copies of its files,
+  3 by default: one at your site and one on each of two other sites, never two on the
+  same site. An upload is confirmed once it's stored at your site, and the copies follow
+  within seconds. The web interface shows what's still being copied. With fewer sites
+  online, files get as many copies as there are sites, and the rest follow when more
+  sites are available.
 - **Damage is repaired.** Every block is checked against its checksum whenever it's
   read, and once a month a scrub checks all of the site's files: here, and their copies
   on other sites, which must prove they hold the exact same bytes (the **Scrub** page
@@ -631,9 +633,10 @@ The second line keeps the setting after a reboot.
 
 <details><summary><b>"1 of 2 copies" or "blocks pending"</b></summary>
 
-Every file should have copies on two other sites, but fewer are online, or the copies
-are still being made. Everything works normally, and the missing copies are made as
-sites become available.
+A bucket asks for more copies than there are sites online, or the copies are still being
+made. Everything works normally, and the missing copies are made as sites become
+available. If the IBS simply has too few sites for a bucket, lower its copies under
+**Buckets**, or invite another site.
 
 </details>
 
@@ -707,14 +710,16 @@ again.
 
 **How many copies are kept, and can I change it?**
 
-Every file exists three times: at your site and on two other sites. That's fixed, so
-there's nothing to set and nothing to get wrong. With only one other site, files have
-one copy there and a warning says so; see ["1 of 2 copies"](#sites).
+Each bucket keeps 1 to 3 copies of its files, 3 by default: at your site and on two
+other sites. Change it under **Buckets**, also later: more copies are made in the
+background, and with fewer, the surplus copies on other sites are deleted. With 1 copy,
+files are only at your site: if it's lost, so are they. If a bucket asks for more copies
+than the IBS has sites, a warning says so; see ["1 of 2 copies"](#sites).
 
 **How much more can I store?**
 
-**Buckets** shows an estimate: what fits at your site and twice on two different other
-sites. It's an estimate because other sites in the IBS can use the same free space.
+**Buckets** shows an estimate: what fits at your site and, for the copies you choose, on
+as many different other sites. It's an estimate because other sites in the IBS can use the same free space.
 
 **Is the site's metadata on the nodes too?**
 

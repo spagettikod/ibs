@@ -772,9 +772,9 @@ func (s *Site) blockFigures() (ReplicationHealth, []blockGroup) {
 			COUNT(CASE WHEN o > repl THEN 1 END),
 			COALESCE(SUM(min(c, want)), 0), COALESCE(SUM(want), 0), COUNT(CASE WHEN c < want THEN 1 END),
 			COALESCE(SUM(CASE WHEN c < want THEN (want - c) * size END), 0),
-			COALESCE(SUM(CASE WHEN a = 0 THEN size END), 0), COALESCE(SUM(CASE WHEN a > 0 AND a < ? THEN size END), 0),
-			COUNT(CASE WHEN a = 0 THEN 1 END)
-		FROM x GROUP BY bucket, node_id`, countedSince, sites, Copies)
+			COALESCE(SUM(CASE WHEN a = 0 AND repl > 0 THEN size END), 0), COALESCE(SUM(CASE WHEN a > 0 AND a < repl THEN size END), 0),
+			COUNT(CASE WHEN a = 0 AND repl > 0 THEN 1 END)
+		FROM x GROUP BY bucket, node_id`, countedSince, sites)
 	if err != nil {
 		return h, nil
 	}

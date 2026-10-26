@@ -80,6 +80,8 @@ export type Dashboard = {
     pending_bytes: number; missing_locally: number; missing_bytes: number; pending_deletes: number; no_room: number; copies_made: number; copies_possible: number; copying: number; copying_bytes: number
   }
   ibs_capacity: IBSCapacity
+  short_buckets: { name: string; replicas: number }[] // ask for more copies than there are sites
+  other_sites: number // in the IBS, online or not
   counted: boolean // the figures above are in; false right after a start
   restore_bps: number // blocks fetched back from other sites' copies, bytes/s
   // Cleanup of blocks: small files still to combine, bytes of deleted files still to free.
@@ -103,7 +105,7 @@ export type StorableCapacity = {
   limited_by: 'site' | 'ibs' | 'sites'
 }
 
-export type Bucket = { name: string; created: string; replication: number; counted: boolean; activity?: 'writing' | 'deleting'; objects: number; size: number; pending: number }
+export type Bucket = { name: string; created: string; replication: number; replicas: number; short: boolean; counted: boolean; activity?: 'writing' | 'deleting'; objects: number; size: number; pending: number }
 
 export type ObjectInfo = { bucket: string; key: string; size: number; etag: string; content_type: string; modified: string }
 

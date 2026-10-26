@@ -309,8 +309,17 @@ type Dashboard struct {
 	Peers       []PeerInfo        `json:"peers"`
 	Network     []NetSite         `json:"network"`
 	Relays      []RelayInfo       `json:"relays"`
-	Links       []Link            `json:"links"`
-	RelayNodes  []RelayNode       `json:"relay_nodes"`
+	// ShortBuckets want more copies than the IBS has sites for.
+	ShortBuckets []ShortBucket `json:"short_buckets"`
+	OtherSites   int           `json:"other_sites"` // in the IBS, online or not
+	Links        []Link        `json:"links"`
+	RelayNodes   []RelayNode   `json:"relay_nodes"`
+}
+
+// ShortBucket is a bucket that asks for more copies than there are sites.
+type ShortBucket struct {
+	Name     string `json:"name"`
+	Replicas int    `json:"replicas"`
 }
 
 func (s *Site) Dashboard() (*Dashboard, error) {
@@ -327,6 +336,17 @@ func (s *Site) Dashboard() (*Dashboard, error) {
 	d.Site.Location = s.Location()
 	s.DB.QueryRow(`SELECT COUNT(*) FROM buckets`).Scan(&d.Site.Buckets)
 	d.Activity = s.Activity()
+	d.OtherSites = s.otherSites()
+	d.ShortBuckets = []ShortBucket{}
+	if rows, err := s.DB.Query(`SELECT name, replication FROM buckets WHERE replication > ? ORDER BY name`, d.OtherSites); err == nil {
+		for rows.Next() {
+			var b ShortBucket
+			rows.Scan(&b.Name, &b.Replicas)
+			b.Replicas++
+			d.ShortBuckets = append(d.ShortBuckets, b)
+		}
+		rows.Close()
+	}
 	d.RestoreBps = s.restoring.bps()
 	// The expensive figures come from the cache (stats.go).
 	if st := s.stats(); st != nil {
@@ -373,27 +393,29 @@ type IBSCapacity struct {
 	Sites  int   `json:"sites"`
 	Free   int64 `json:"free"`
 	Needed int64 `json:"needed"`
-	Copies int   `json:"copies"` // copies each file should have on other sites
+	Copies int   `json:"copies"` // copies on other sites the buckets ask for, at most
 	Fits   bool  `json:"fits"`
 }
 
 func (s *Site) IBSCapacity(h ReplicationHealth) IBSCapacity {
-	c := IBSCapacity{Needed: h.PendingBytes, Copies: Copies}
+	c := IBSCapacity{Needed: h.PendingBytes}
+	s.DB.QueryRow(`SELECT COALESCE(MAX(replication), 0) FROM buckets`).Scan(&c.Copies)
 	var free []int64
 	for _, p := range s.onlinePeers() {
 		c.Sites++
 		c.Free += p.free
 		free = append(free, max(p.free, 0))
 	}
-	// Blocks missing both copies need two different sites; the others one.
+	// Blocks with no copy elsewhere need as many different sites as their
+	// bucket asks for (at most c.Copies); the others one more.
 	both, one := h.noCopy, h.someCopies
-	c.Fits = c.Sites >= Copies && one+Copies*both <= c.Free && both <= replicable(free, Copies)
+	c.Fits = c.Sites >= c.Copies && one+int64(c.Copies)*both <= c.Free && (c.Copies == 0 || both <= replicable(free, c.Copies))
 	return c
 }
 
-// StorableCapacity estimates how much more data this site can store right
-// now with its copies on other sites: one copy here (within the nodes'
-// limits) and one on each of Copies different online sites, using the space
+// StorableCapacity estimates how much more data with replicas copies this
+// site can store right now: one copy here (within the nodes' limits) and one
+// on each of replicas-1 different online sites, using the space
 // they offer. A site holds at most one copy of a block, so the replicated
 // amount X is the largest value with sum(min(free_i, X)) >= Copies*X: one
 // large site cannot stand in for two. Other sites may count on the same free
@@ -401,12 +423,13 @@ func (s *Site) IBSCapacity(h ReplicationHealth) IBSCapacity {
 type StorableCapacity struct {
 	Local     int64  `json:"local"`      // free space at this site
 	Sites     int    `json:"sites"`      // other sites online
-	Copies    int    `json:"copies"`     // copies on other sites files get now (at most Copies)
+	Copies    int    `json:"copies"`     // copies on other sites files get now (at most replicas-1)
 	Storable  int64  `json:"storable"`   // how much more can be stored
 	LimitedBy string `json:"limited_by"` // "site", "ibs" (other sites' space) or "sites" (too few sites)
 }
 
-func (s *Site) StorableCapacity() StorableCapacity {
+func (s *Site) StorableCapacity(replicas int) StorableCapacity {
+	want := min(max(replicas, 1), MaxReplicas) - 1
 	_, local := s.siteCapacity()
 	var free []int64
 	for _, p := range s.onlinePeers() {
@@ -416,9 +439,12 @@ func (s *Site) StorableCapacity() StorableCapacity {
 	if st := s.stats(); st != nil {
 		local = max(local-st.Health.MissingBytes, 0)
 	}
-	c := StorableCapacity{Local: local, Sites: len(free), Copies: min(Copies, len(free))}
+	c := StorableCapacity{Local: local, Sites: len(free), Copies: min(want, len(free))}
 	if c.Copies == 0 {
-		c.Storable, c.LimitedBy = local, "sites"
+		c.Storable, c.LimitedBy = local, "site"
+		if want > 0 {
+			c.LimitedBy = "sites"
+		}
 		return c
 	}
 	if ibs := replicable(free, c.Copies); local <= ibs {
@@ -426,7 +452,7 @@ func (s *Site) StorableCapacity() StorableCapacity {
 	} else {
 		c.Storable, c.LimitedBy = ibs, "ibs"
 	}
-	if c.Copies < Copies {
+	if c.Copies < want {
 		c.LimitedBy = "sites"
 	}
 	return c

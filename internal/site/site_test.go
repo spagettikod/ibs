@@ -536,7 +536,7 @@ func TestEveryFileHasTwoCopiesElsewhere(t *testing.T) {
 		}
 	}
 	// Without other sites, files are stored here and the copies follow later.
-	c := s.StorableCapacity()
+	c := s.StorableCapacity(Copies + 1)
 	if c.Copies != 0 || c.LimitedBy != "sites" || c.Storable != c.Local {
 		t.Errorf("capacity without other sites: %+v", c)
 	}
@@ -897,7 +897,7 @@ func TestRestoringCountsAsUsed(t *testing.T) {
 	s.SetNodeLimit(LocalNodeID, 1<<20) // so the room depends on what IBS holds, not the disk
 	s.PutObject(ctx, "back", "f", strings.NewReader(strings.Repeat("x", 5000)), "", nil)
 	s.refreshStats()
-	before := s.StorableCapacity().Local
+	before := s.StorableCapacity(Copies + 1).Local
 	var size int64
 	s.DB.QueryRow(`SELECT SUM(size) FROM blocks`).Scan(&size)
 	s.DB.Exec(`UPDATE blocks SET node_id = ''`) // as Restore leaves them
@@ -909,7 +909,7 @@ func TestRestoringCountsAsUsed(t *testing.T) {
 	// The room counts the block as used while it is still to come back. (The
 	// node's free space isn't refreshed here; on a real restore it is higher
 	// by the blocks not back yet, which this takes off again.)
-	if got := s.StorableCapacity().Local; got != before-size {
+	if got := s.StorableCapacity(Copies + 1).Local; got != before-size {
 		t.Fatalf("room = %d; want %d, less the %d bytes still to come back", got, before-size, size)
 	}
 }

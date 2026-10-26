@@ -49,22 +49,31 @@ function attention(d: Dashboard, tls?: TLSStatus, updates?: UpdatesInfo, scrub?:
   for (const rl of d.relays ?? []) {
     if (!rl.connected) out.push({ level: 'warn', text: `Sites that reach this site only through relay ${rl.name} can't connect: the relay isn't connected`, href: '#/network', link: 'The Known Universe' })
   }
-  for (const p of d.peers ?? []) {
-    if (!p.online) out.push({ level: 'warn', text: `Your copies on ${p.name} can't be reached, and new copies wait for it: the site is offline (seen ${ago(p.last_seen)})`, href: '#/network', link: 'The Known Universe' })
+  // Warnings about copies only when a bucket asks for copies elsewhere.
+  const wantCopies = c.copies > 0
+  if (wantCopies) {
+    for (const p of d.peers ?? []) {
+      if (!p.online) out.push({ level: 'warn', text: `Your copies on ${p.name} can't be reached, and new copies wait for it: the site is offline (seen ${ago(p.last_seen)})`, href: '#/network', link: 'The Known Universe' })
+    }
   }
-  if (!counted) {
-    // nothing yet
-  } else if (c.sites > 0 && c.sites < c.copies) {
-    out.push({ level: 'warn', text: `Your files aren't fully protected: they have ${c.sites} of ${c.copies} copies on other sites, because only ${c.sites} other ${c.sites === 1 ? 'site is' : 'sites are'} online`, href: '#/network', link: 'The Known Universe' })
+  const short = d.short_buckets ?? []
+  if (short.length > 0) {
+    const names = short.map((b) => b.name)
+    const list = names.length === 1 ? names[0] : names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1]
+    const most = Math.max(...short.map((b) => b.replicas))
+    const sites = d.other_sites + 1
+    out.push({ level: 'warn', text: `Files in ${list} aren't fully protected: ${names.length === 1 ? "it's" : "they're"} set to ${most} copies, ` +
+      `but the IBS has only ${sites} ${sites === 1 ? 'site' : 'sites'}. Lower the copies, or invite another site.`, href: '#/buckets', link: 'Buckets' })
+  }
+  if (!counted || !wantCopies) {
+    // nothing (yet)
   } else if (r.no_room > 0 || (!c.fits && r.under_replicated > 0)) {
     out.push({ level: 'warn', text: `Your files aren't fully protected: ${r.under_replicated.toLocaleString()} blocks lack copies because the IBS is running out of space. They get them when there's room.`, href: '#/network', link: 'The Known Universe' })
   } else if (r.under_replicated > 0) {
     out.push({ level: 'info', text: `${r.under_replicated.toLocaleString()} blocks aren't protected yet: they're being copied to other sites`, href: '#/buckets', link: 'Buckets' })
   }
-  if (!d.site.peer_advertise && (d.relays ?? []).length === 0) {
+  if (wantCopies && !d.site.peer_advertise && (d.relays ?? []).length === 0) {
     out.push({ level: 'warn', text: 'Your files get no copies: other sites can\'t reach this site. Add a relay.', href: '#/network', link: 'The Known Universe' })
-  } else if ((d.peers ?? []).length === 0) {
-    out.push({ level: 'warn', text: 'Your files get no copies: this site isn\'t connected to another site yet', href: '#/network', link: 'The Known Universe' })
   }
   const rank = { bad: 0, warn: 1, info: 2 }
   return out.sort((a, b) => rank[a.level] - rank[b.level])
@@ -142,6 +151,7 @@ export default function DashboardPage() {
   // Copies per file on other sites: wanted, and what the online sites allow.
   const want = data.ibs_capacity.copies
   const have = Math.min(data.ibs_capacity.sites, want)
+  const shortCount = (data.short_buckets ?? []).length
 
   return (
     <div className="page">
@@ -160,13 +170,14 @@ export default function DashboardPage() {
           <>
             <Stat label="Your files" value={<Spinner />} sub="counting…" />
             <Stat label="Copies on other sites"
-              value={<>{r.copying > 0 ? `${copied}%` : `${have} of ${want}`}{sendingBps > 0 && <> <Spinner title="Copying to other sites" /></>}</>}
-              tone={r.under_replicated === 0 ? 'ok' : 'warn'}
+              value={<>{r.copying > 0 ? `${copied}%` : want === 0 ? 'None' : `${have} of ${want}`}{sendingBps > 0 && <> <Spinner title="Copying to other sites" /></>}</>}
+              tone={r.under_replicated === 0 && shortCount === 0 ? 'ok' : 'warn'}
               sub={r.copying > 0 ? <>
                 <Meter used={r.copies_made} total={r.copies_possible} />
                 {sendingBps > 0
                   ? <>{fmtBytes(r.copying_bytes)} left · {fmtSpeed(sendingBps)} · about {fmtDuration(r.copying_bytes / sendingBps)}</>
                   : <span className="warn-text">{copyWait}</span>}</>
+                : shortCount > 0 ? 'per file; the IBS has too few sites'
                 : r.under_replicated > 0 && have < want ? `per file; the next needs ${want - have === 1 ? 'another site' : 'more sites'}`
                 : r.under_replicated > 0 ? `per file; ${r.under_replicated.toLocaleString()} blocks wait for room`
                 : 'per file, all in place'} />
@@ -179,9 +190,11 @@ export default function DashboardPage() {
                 {restoreNote && <div className="accent-text">{restoreNote}</div>}
                 {cleanupNotes.map((n) => <div key={n} className={cl.active ? 'accent-text' : 'muted'}>{n}</div>)}
                 {`${site.objects.toLocaleString()} ${site.objects === 1 ? 'object' : 'objects'} in ${site.buckets} ${site.buckets === 1 ? 'bucket' : 'buckets'}, ${r.blocks.toLocaleString()} ${r.blocks === 1 ? 'block' : 'blocks'}`}</>} />
-            <Stat label="Copies on other sites" value={r.copying > 0 ? `${copied}%` : `${have} of ${want}`}
-              tone={r.under_replicated === 0 ? 'ok' : 'warn'}
-              sub={r.copying > 0 ? `copying, ${r.copying.toLocaleString()} blocks left`
+            <Stat label="Copies on other sites" value={r.copying > 0 ? `${copied}%` : want === 0 ? 'None' : `${have} of ${want}`}
+              tone={r.under_replicated === 0 && shortCount === 0 ? 'ok' : 'warn'}
+              sub={want === 0 ? 'every bucket keeps its files only here'
+                : r.copying > 0 ? `copying, ${r.copying.toLocaleString()} blocks left`
+                : shortCount > 0 ? 'per file; the IBS has too few sites'
                 : r.under_replicated > 0 && have < want ? `per file; the next needs ${want - have === 1 ? 'another site' : 'more sites'}`
                 : r.under_replicated > 0 ? `per file; ${r.under_replicated.toLocaleString()} blocks wait for room`
                 : 'per file, all in place'} />

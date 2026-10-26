@@ -101,16 +101,38 @@ func (s *Server) routes() {
 		return writeJSON(w, nonNil(b))
 	}))
 	m.HandleFunc("GET /api/capacity", a(func(w http.ResponseWriter, r *http.Request, st *site.Site) error {
-		return writeJSON(w, st.StorableCapacity())
+		replicas, err := strconv.Atoi(r.URL.Query().Get("replicas"))
+		if err != nil {
+			replicas = site.Copies + 1
+		}
+		return writeJSON(w, st.StorableCapacity(replicas))
 	}))
 	m.HandleFunc("POST /api/buckets", a(func(w http.ResponseWriter, r *http.Request, st *site.Site) error {
+		req := struct {
+			Name     string `json:"name"`
+			Replicas int    `json:"replicas"`
+		}{Replicas: site.Copies + 1}
+		if err := readJSON(r, &req); err != nil {
+			return err
+		}
+		err := st.NewBucket(strings.TrimSpace(req.Name), req.Replicas)
+		if errors.Is(err, site.ErrInvalidReplicas) {
+			return badRequest(err.Error())
+		}
+		return err
+	}))
+	m.HandleFunc("PUT /api/buckets/{name}", a(func(w http.ResponseWriter, r *http.Request, st *site.Site) error {
 		var req struct {
-			Name string `json:"name"`
+			Replicas int `json:"replicas"`
 		}
 		if err := readJSON(r, &req); err != nil {
 			return err
 		}
-		return st.CreateBucket(strings.TrimSpace(req.Name))
+		err := st.SetBucketReplicas(r.PathValue("name"), req.Replicas)
+		if errors.Is(err, site.ErrInvalidReplicas) {
+			return badRequest(err.Error())
+		}
+		return err
 	}))
 	m.HandleFunc("DELETE /api/buckets/{name}", a(func(w http.ResponseWriter, r *http.Request, st *site.Site) error {
 		return st.DeleteBucket(r.PathValue("name"))

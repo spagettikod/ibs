@@ -3,6 +3,15 @@
 Each release says what to update and which launcher and relay it works with: IBS,
 the launcher and the relay are released separately.
 
+## Unreleased
+
+### New
+
+- **Copies per bucket:** 1 (only this site) to 3, chosen when creating a bucket and
+  changeable later.
+- Warnings about copies only appear when a bucket asks for more copies than the IBS has
+  sites.
+
 ## 1.11.0
 
 **What to update:** sites, under **Settings → Updates**, once 1.10 has switched them to
