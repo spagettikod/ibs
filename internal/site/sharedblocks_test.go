@@ -346,7 +346,7 @@ func TestBucketReplicas(t *testing.T) {
 	if err := s.NewBucket("here", 1); err != nil {
 		t.Fatal(err)
 	}
-	s.CreateBucket("default") // 3 copies
+	s.CreateBucket("default")  // 3 copies
 	big := make([]byte, 2<<20) // not a small file: copied as it is
 	rand.Read(big)
 	s.PutObject(ctx, "here", "f", bytes.NewReader(big), "", nil)
