@@ -149,3 +149,50 @@ func TestGitHubRateLimit(t *testing.T) {
 		t.Fatal("the time of the last check isn't kept")
 	}
 }
+
+// A newer version this site can't install doesn't hide a fix for the one it
+// runs: the check goes on to the newest one it can.
+func TestGitHubStepsBack(t *testing.T) {
+	s := newTestSite(t)
+	was := version.Version
+	version.Version = "1.0.0"
+	t.Cleanup(func() { version.Version = was })
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	if _, err := s.AddReleaseKey(release.Key{Pub: pub}.String(), "mine"); err != nil {
+		t.Fatal(err)
+	}
+	bundle := func(v string) []byte {
+		return release.MakeBundle(priv, []byte("program "+v), release.Manifest{Version: v, Platform: release.Platform, MinCompatible: "1.0.0", DBLevel: db.Level}).BundleBytes()
+	}
+	if _, err := s.UploadRelease(bytes.NewReader(bundle("1.2.0"))); err != nil {
+		t.Fatal(err)
+	}
+	s.store().MarkBad("1.2.0")
+	var fetched []string
+	var gh *httptest.Server
+	gh = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if v := strings.TrimPrefix(r.URL.Path, "/asset/"); v != r.URL.Path {
+			fetched = append(fetched, v)
+			w.Write(bundle(v))
+			return
+		}
+		var list []string
+		for _, v := range []string{"1.1.0", "1.2.0", "1.1.1"} {
+			list = append(list, `{"tag_name":"v`+v+`","assets":[{"name":"ibs-`+v+release.AssetSuffix+`","browser_download_url":"`+gh.URL+`/asset/`+v+`"}]}`)
+		}
+		w.Write([]byte("[" + strings.Join(list, ",") + "]"))
+	}))
+	defer gh.Close()
+	t.Setenv("IBS_RELEASES_URL", gh.URL)
+	s.CheckGitHubNow(context.Background())
+	if !slices.Equal(fetched, []string{"1.1.1"}) || s.Updates().GitHubError != "" {
+		t.Fatalf("fetched %v (want only 1.1.1), error %q", fetched, s.Updates().GitHubError)
+	}
+	if s.newestHeld() != "1.1.1" {
+		t.Fatalf("newest installable = %s, want 1.1.1", s.newestHeld())
+	}
+	s.CheckGitHubNow(context.Background())
+	if len(fetched) != 1 {
+		t.Fatalf("fetched again: %v", fetched)
+	}
+}

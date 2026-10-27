@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 )
 
@@ -62,6 +63,16 @@ type GitHubRelease struct {
 // release) and returns the newest release with a file for this platform.
 // Betas and other pre-releases count only when betas is true.
 func PickGitHubRelease(body []byte, betas bool) (GitHubRelease, error) {
+	list, err := GitHubReleases(body, betas)
+	if err != nil {
+		return GitHubRelease{}, err
+	}
+	return list[0], nil
+}
+
+// GitHubReleases is like PickGitHubRelease, but returns every release that
+// fits, newest first.
+func GitHubReleases(body []byte, betas bool) ([]GitHubRelease, error) {
 	type ghRelease struct {
 		TagName    string `json:"tag_name"`
 		Draft      bool   `json:"draft"`
@@ -75,32 +86,30 @@ func PickGitHubRelease(body []byte, betas bool) (GitHubRelease, error) {
 	if err := json.Unmarshal(body, &list); err != nil {
 		var one ghRelease
 		if err := json.Unmarshal(body, &one); err != nil {
-			return GitHubRelease{}, fmt.Errorf("unexpected answer from GitHub: %w", err)
+			return nil, fmt.Errorf("unexpected answer from GitHub: %w", err)
 		}
 		list = []ghRelease{one}
 	}
-	var best GitHubRelease
+	var out []GitHubRelease
 	for _, r := range list {
 		v := strings.TrimPrefix(r.TagName, "v")
 		if r.Draft || !IsVersion(v) || (!betas && (r.Prerelease || Prerelease(v))) {
 			continue
 		}
-		if best.Version != "" && Compare(v, best.Version) <= 0 {
-			continue
-		}
 		for _, a := range r.Assets {
 			if strings.HasSuffix(a.Name, AssetSuffix) {
-				best = GitHubRelease{Version: v, AssetURL: a.URL}
+				out = append(out, GitHubRelease{Version: v, AssetURL: a.URL})
 				break
 			}
 		}
 	}
-	if best.Version == "" {
+	if len(out) == 0 {
 		kind := "release"
 		if !betas {
 			kind = "stable release"
 		}
-		return best, fmt.Errorf("%w: no %s with a %s file", ErrNoRelease, kind, AssetSuffix)
+		return nil, fmt.Errorf("%w: no %s with a %s file", ErrNoRelease, kind, AssetSuffix)
 	}
-	return best, nil
+	slices.SortStableFunc(out, func(a, b GitHubRelease) int { return Compare(b.Version, a.Version) })
+	return out, nil
 }

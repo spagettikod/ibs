@@ -534,15 +534,22 @@ func (s *Site) noticeReleases(ctx context.Context, st SiteStatus) {
 }
 
 // newestHeld is the newest version this site holds that it would run, or the
-// running one.
+// running one. A newer one it can't run (it failed to start, or doesn't work
+// with this site or the IBS) doesn't count: it mustn't keep a fix for the
+// running version from being fetched.
 func (s *Site) newestHeld() string {
 	newest := version.Version
 	for _, in := range s.store().List(s.store().Keys()) {
-		if !in.Bad && s.wanted(in.Version) && release.Compare(in.Version, newest) > 0 {
+		if s.runnable(in) && s.wanted(in.Version) && release.Compare(in.Version, newest) > 0 {
 			newest = in.Version
 		}
 	}
 	return newest
+}
+
+// runnable reports whether this site could install in.
+func (s *Site) runnable(in release.Installed) bool {
+	return !in.Bad && s.compatBlocker(in.Manifest) == ""
 }
 
 // fetchReleases gets newer versions this site doesn't hold yet: from
@@ -684,8 +691,10 @@ func (s *Site) githubDue() bool {
 	return time.Since(s.updates.githubChecked) > s.CheckInterval() && time.Now().After(s.updates.githubRetry)
 }
 
-// checkGitHub looks at the latest release on GitHub and downloads it when it
-// is newer than what this site holds.
+// checkGitHub looks at the releases on GitHub and downloads the newest one
+// this site can install, when it is newer than what this site holds. Newer
+// ones it can't install are downloaded too (the Updates page says why they
+// can't be), once.
 func (s *Site) checkGitHub(ctx context.Context) {
 	// No total time limit: requests fail when they make no progress
 	// (httpGet), so a slow line still gets there and a dead one fails fast.
@@ -704,35 +713,37 @@ func (s *Site) checkGitHub(ctx context.Context) {
 				db.SetSetting(s.DB, "github_notes", string(b))
 			}
 		}
-		rel, err := release.PickGitHubRelease(body, s.Betas())
+		rels, err := release.GitHubReleases(body, s.Betas())
 		if errors.Is(err, release.ErrNoRelease) {
 			return nil // nothing to take (yet)
 		}
 		if err != nil {
 			return err
 		}
-		v := rel.Version
 		s.updates.mu.Lock()
-		s.updates.githubLatest = v
+		s.updates.githubLatest = rels[0].Version
 		s.updates.mu.Unlock()
+		held := map[string]bool{}
 		for _, in := range s.store().List(s.store().Keys()) {
-			if in.Version == v || (!in.Bad && release.Compare(in.Version, v) > 0) {
-				return nil // already held, or something newer that works
+			held[in.Version] = true
+		}
+		newest := s.newestHeld()
+		for _, rel := range rels {
+			if release.Compare(rel.Version, newest) <= 0 {
+				return nil // this site has it, or something newer it can install
+			}
+			if held[rel.Version] {
+				continue // held, but this site can't install it
+			}
+			in, err := s.downloadRelease(ctx, rel.AssetURL)
+			if err != nil {
+				return err
+			}
+			s.log.Info("downloaded release from GitHub", "version", in.Version)
+			if s.runnable(in) {
+				return nil
 			}
 		}
-		if release.Compare(version.Version, v) >= 0 {
-			return nil
-		}
-		resp, err = httpGet(ctx, rel.AssetURL)
-		if err != nil {
-			return err
-		}
-		defer resp.Body.Close()
-		in, err := s.UploadRelease(resp.Body)
-		if err != nil {
-			return err
-		}
-		s.log.Info("downloaded release from GitHub", "version", in.Version)
 		return nil
 	}()
 	s.updates.mu.Lock()
@@ -751,6 +762,15 @@ func (s *Site) checkGitHub(ctx context.Context) {
 	s.updates.mu.Unlock()
 	db.SetSetting(s.DB, "github_checked", strconv.FormatInt(time.Now().Unix(), 10))
 	s.notify(TopicPeers)
+}
+
+func (s *Site) downloadRelease(ctx context.Context, url string) (release.Installed, error) {
+	resp, err := httpGet(ctx, url)
+	if err != nil {
+		return release.Installed{}, err
+	}
+	defer resp.Body.Close()
+	return s.UploadRelease(resp.Body)
 }
 
 func httpGet(ctx context.Context, url string) (*http.Response, error) {
