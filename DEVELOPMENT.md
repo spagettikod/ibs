@@ -142,8 +142,8 @@ would misread the data or weaken what it means, like ignoring access key limits.
    `release-image.sh` checks for.
    The changes follow under `### New` and `### Fixed`, one short bullet each. The notes
    go into the signed release, and the Updates page shows them under **Release notes**.
-   The version that drops the encryption from before age is released with
-   `REQUIRES_AGE=1`: sites install it only once all their data is converted.
+   Every release is marked as reading only age (since 1.11.0), so sites still on the
+   encryption from before install it only once all their data is converted.
 2. Tag and push: `git tag -a v<version> -m "IBS <version>" && git push origin main v<version>`.
 3. Build and publish:
 

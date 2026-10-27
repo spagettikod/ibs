@@ -70,8 +70,8 @@ for arch in $ARCHES; do
   sig=$DIST/sign-$arch && mkdir -p "$sig"
   # The release notes travel inside the signed release, so every site can show them.
   sed -n "/^## $VERSION\$/,/^## /p" CHANGELOG.md | sed '1d;$d' >"$sig/notes.md"
-  # REQUIRES_AGE=1: the version reads only age; sites install it once converted.
-  go run ./cmd/ibs-release manifest -version "$VERSION" -platform "linux/$arch" -notes "$sig/notes.md" ${REQUIRES_AGE:+-requires-age} "$stage/ibs" >"$sig/manifest.json"
+  # Every version since 1.11.0 reads only age: sites install it once converted.
+  go run ./cmd/ibs-release manifest -version "$VERSION" -platform "linux/$arch" -notes "$sig/notes.md" -requires-age "$stage/ibs" >"$sig/manifest.json"
   openssl pkeyutl -sign -rawin -inkey "$SIGNING_KEY" -in "$sig/manifest.json" -out "$sig/manifest.sig"
   go run ./cmd/ibs-release pack -o "$DIST/$name.ibsrelease" "$stage/ibs" "$sig/manifest.json" "$sig/manifest.sig"
   rm -rf "$sig"
