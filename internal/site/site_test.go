@@ -540,8 +540,9 @@ func TestEveryFileHasTwoCopiesElsewhere(t *testing.T) {
 	if c.Copies != 0 || c.LimitedBy != "sites" || c.Storable != c.Local {
 		t.Errorf("capacity without other sites: %+v", c)
 	}
-	if h := s.IBSCapacity(s.ReplicationHealth()); h.Copies != Copies || h.Fits {
-		t.Errorf("IBS capacity without other sites should not fit: %+v", h)
+	// Too few sites isn't a lack of space: short buckets say so instead.
+	if h := s.IBSCapacity(s.ReplicationHealth()); h.Copies != Copies || h.Sites != 0 || !h.Fits {
+		t.Errorf("IBS capacity without other sites: %+v", h)
 	}
 }
 

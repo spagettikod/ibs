@@ -67,10 +67,12 @@ function attention(d: Dashboard, tls?: TLSStatus, updates?: UpdatesInfo, scrub?:
   }
   if (!counted || !wantCopies) {
     // nothing (yet)
-  } else if (r.no_room > 0 || (!c.fits && r.under_replicated > 0)) {
-    out.push({ level: 'warn', text: `Your files aren't fully protected: ${r.under_replicated.toLocaleString()} blocks lack copies because the IBS is running out of space. They get them when there's room.`, href: '#/network', link: 'The Known Universe' })
-  } else if (r.under_replicated > 0) {
-    out.push({ level: 'info', text: `${r.under_replicated.toLocaleString()} blocks aren't protected yet: they're being copied to other sites`, href: '#/buckets', link: 'Buckets' })
+  } else if (r.copying > 0 && (r.no_room > 0 || !c.fits)) {
+    // Only copies the sites there are could take: those that need more
+    // sites are the short buckets' warning above.
+    out.push({ level: 'warn', text: `Your files aren't fully protected: ${r.copying.toLocaleString()} blocks lack copies because the other sites are running out of space. They get them when there's room.`, href: '#/network', link: 'The Known Universe' })
+  } else if (r.copying > 0) {
+    out.push({ level: 'info', text: `${r.copying.toLocaleString()} blocks aren't protected yet: they're being copied to other sites`, href: '#/buckets', link: 'Buckets' })
   }
   if (wantCopies && !d.site.peer_advertise && (d.relays ?? []).length === 0) {
     out.push({ level: 'warn', text: 'Your files get no copies: other sites can\'t reach this site. Add a relay.', href: '#/network', link: 'The Known Universe' })

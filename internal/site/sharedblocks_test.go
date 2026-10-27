@@ -380,6 +380,13 @@ func TestBucketReplicas(t *testing.T) {
 	if got := fmt.Sprint(short()); got != "[default:3]" {
 		t.Fatalf("buckets reported short with one other site: %s", got)
 	}
+	// With the copy the one other site can take, nothing waits for room:
+	// the third copy needs a site, not space.
+	s.DB.Exec(`INSERT INTO replicas(block_id, site_id, state, verified) SELECT id, 'p', 'ok', ? FROM blocks WHERE bucket = 'default'`, now)
+	if h := s.ReplicationHealth(); h.Copying != 0 || !s.IBSCapacity(h).Fits {
+		t.Fatalf("a short bucket counts as out of space: %+v %+v", h, s.IBSCapacity(h))
+	}
+	s.DB.Exec(`DELETE FROM replicas`)
 	if b, _ := s.ListBuckets(); !b[0].Short || b[0].Replicas != 3 || b[1].Short || b[1].Replicas != 1 {
 		t.Fatalf("bucket list: %+v", b)
 	}

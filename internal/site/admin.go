@@ -386,9 +386,9 @@ func nonNil[T any](s []T) []T {
 	return s
 }
 
-// IBSCapacity answers whether this site's replication fits on the IBS as a
-// whole: enough distinct online sites for the highest replica count, and
-// enough combined storage offered by them for the copies still to be made.
+// IBSCapacity answers whether the copies the online sites can take fit in
+// the space they offer. Copies there are too few sites for don't count here:
+// buckets asking for them are shown on their own (ShortBuckets).
 type IBSCapacity struct {
 	Sites  int   `json:"sites"`
 	Free   int64 `json:"free"`
@@ -407,9 +407,10 @@ func (s *Site) IBSCapacity(h ReplicationHealth) IBSCapacity {
 		free = append(free, max(p.free, 0))
 	}
 	// Blocks with no copy elsewhere need as many different sites as their
-	// bucket asks for (at most c.Copies); the others one more.
+	// bucket asks for (at most k); the others one more.
+	k := min(c.Copies, c.Sites)
 	both, one := h.noCopy, h.someCopies
-	c.Fits = c.Sites >= c.Copies && one+int64(c.Copies)*both <= c.Free && (c.Copies == 0 || both <= replicable(free, c.Copies))
+	c.Fits = one+int64(k)*both <= c.Free && (k == 0 || both <= replicable(free, k))
 	return c
 }
 
